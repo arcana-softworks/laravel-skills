@@ -5,9 +5,9 @@ description: >-
   (Inertia React default), apply sensible Laravel source defaults in one atomic
   commit, then set up Boost, Wayfinder when needed, JS tooling via vite-plus
   (`vp fmt` / `vp lint` / `vp check` / `vp test` / `vp build`) when present, with
-  oxfmt/oxlint/Vitest fallback otherwise, plus vendored anti-slop Oxlint rules
-  and a generated app CI workflow. Use when the user asks for a new Laravel app,
-  laravel new, or scaffold Laravel.
+  oxfmt/oxlint/Vitest fallback otherwise, plus anti-slop Oxlint rules fetched
+  fresh from upstream at run time, and a generated app CI workflow. Use when
+  the user asks for a new Laravel app, laravel new, or scaffold Laravel.
 ---
 
 # laravel-new
@@ -44,10 +44,11 @@ Or list the same steps yourself using the table below. Include kit, DB, PHP test
 | `boost` | Install Laravel Boost and configure agents |
 | `wayfinder` | Install Wayfinder when Inertia + Vite (skip if already present / non-Inertia) |
 | `js-fmt-lint` | Configure oxfmt/oxlint via vite-plus `vp` (or direct ox* fallback) + package scripts |
-| `anti-slop` | Vendor [dmmulroy/anti-slop](https://github.com/dmmulroy/anti-slop) Oxlint rules and wire into vp/oxlint config |
+| `anti-slop` | Fetch latest [dmmulroy/anti-slop](https://github.com/dmmulroy/anti-slop) into the app and wire into vp/oxlint config |
 | `vitest` | Add Vitest smoke tests, setup file, and `test:js` script |
-| `ci` | Write `.github/workflows/ci.yml` (check/dry-run php + js jobs) |
-| `commits` | Three-commit layout: scaffold → essentials → tooling |
+| `ci` | Write `.github/workflows/ci.yml` (check/dry-run php + js jobs; optional docker build) |
+| `docker` | ServerSideUp PHP Docker (`serversideup/php`): Dockerfile, compose, queue/scheduler |
+| `commits` | Commit layout: scaffold → essentials → tooling → docker (if enabled) |
 
 Honour removals by passing `--skip <id>` (repeatable) to the scripts, e.g.:
 
@@ -56,6 +57,8 @@ Honour removals by passing `--skip <id>` (repeatable) to the scripts, e.g.:
 ```
 
 Legacy flags `--skip-boost` / `--skip-wayfinder` still work. Package manager is a **choice** in the plan (not a skippable step): follow the kit lockfile (default npm); pass `--pm` only on explicit user request.
+
+Docker **variant** is also a plan choice (default `fpm-nginx`; offer `frankenphp` — also `fpm-apache` / `cli`). Pass `--docker-variant frankenphp` to `setup-tooling` / `setup-docker` / `print-plan`.
 
 ## Ask only what is needed
 
@@ -67,6 +70,7 @@ Legacy flags `--skip-boost` / `--skip-wayfinder` still work. Package manager is 
 | Tests (PHP) | `phpunit` |
 | Boost agents | `cursor,claude_code,codex` |
 | JS package manager | **Follow the kit lockfile** (see below); do not ask unless the user brings it up |
+| Docker variant | **`fpm-nginx`** (offer `frankenphp`) |
 
 Kits: `--react` / `--vue` / `--svelte` / `--livewire` / none / `--using=<package-or-url>`.
 
@@ -89,6 +93,7 @@ Use **pnpm** (or yarn/bun) only when the user explicitly asks. Then pass `--pm p
 1. **Scaffold** — untouched kit  
 2. **Essentials** — sensible PHP defaults only (one atomic commit)  
 3. **Tooling** — Boost, Wayfinder (if needed), vite-plus/`vp` (or oxfmt/oxlint/Vitest fallback), anti-slop, app `.github/workflows/ci.yml`, deps, build, tests  
+4. **Docker** (when `docker` step enabled) — dedicated commit for Dockerfile / compose / DOCKER.md (or fold into tooling with a clearly named message)
 
 ### 1) Scaffold
 
@@ -123,19 +128,22 @@ Key paste targets (see reference for full blocks):
 | `app/Console/Commands/MakeActionCommand.php` + `stubs/action.stub` | From `reference/stubs/` |
 | `pint.json` / optional `rector.php` | From `reference/stubs/` |
 
-### 3) Tooling (Boost + Wayfinder + JS + anti-slop + CI)
+### 3) Tooling (Boost + Wayfinder + JS + anti-slop + CI + Docker)
 
 ```bash
 "${SKILL_ROOT}/scripts/setup-tooling" --dir . --agents cursor,claude_code,codex
-# With skips from plan-and-confirm, e.g.:
-# "${SKILL_ROOT}/scripts/setup-tooling" --dir . --agents cursor,claude_code,codex --skip boost --skip vitest
+# With skips / docker variant from plan-and-confirm, e.g.:
+# "${SKILL_ROOT}/scripts/setup-tooling" --dir . --agents cursor,claude_code,codex --skip boost --docker-variant frankenphp
 # Only if the user explicitly requested pnpm (or yarn/bun):
 # "${SKILL_ROOT}/scripts/setup-tooling" --dir . --agents cursor,claude_code,codex --pm pnpm
 git add -A
 git commit -m "Install Boost, Wayfinder (if needed), vite-plus/vp JS tooling, anti-slop, and project tooling"
+# Prefer a separate docker commit when the docker step ran:
+# git add Dockerfile .dockerignore docker-compose.yml docker-compose.prod.yml DOCKER.md .github/workflows/ci.yml
+# git commit -m "Add ServerSideUp PHP Docker image (fpm-nginx) with compose and queue/scheduler"
 ```
 
-`setup-tooling` runs, in order (honouring `--skip`): Boost → Wayfinder → `setup-js-tooling` (`js-fmt-lint` / `vitest`) → `setup-anti-slop` → `setup-ci-workflow` → migrate / build / format:check / lint / types / test:js / PHP tests.
+`setup-tooling` runs, in order (honouring `--skip`): Boost → Wayfinder → `setup-js-tooling` (`js-fmt-lint` / `vitest`) → `setup-anti-slop` → `setup-ci-workflow` → `setup-docker` (refreshes CI for the docker build job) → migrate / build / format:check / lint / types / test:js / PHP tests.
 
 JS standard — **prefer vite-plus** on React/Vue/Svelte kits (config in `vite.config` `fmt` / `lint` / `test`; no separate `.oxfmtrc` / `.oxlintrc`, no direct `oxfmt`/`oxlint` deps):
 
@@ -149,26 +157,40 @@ JS standard — **prefer vite-plus** on React/Vue/Svelte kits (config in `vite.c
 
 #### anti-slop
 
-Vendored from [dmmulroy/anti-slop](https://github.com/dmmulroy/anti-slop) (no npm package — copy `src/` → `tools/oxlint/anti-slop`). Skill ships a pinned copy under `reference/anti-slop/` (see `UPSTREAM.md`). Install steps (normal package install + config only):
+Fetch **latest** [dmmulroy/anti-slop](https://github.com/dmmulroy/anti-slop) at run time into the **target app** (the skill does **not** ship a stale rules copy). Follow the upstream README install route:
 
-1. Copy plugin → `tools/oxlint/anti-slop/`
-2. Pin `@oxlint/plugins@<exact oxlint version>` as a devDependency (match installed oxlint, including vite-plus’s nested copy)
-3. Merge `ignorePatterns`, `jsPlugins`, and all generic `rules` into `vite.config` `lint` (and the same ignores into `fmt.ignorePatterns`), or into `.oxlintrc.json` on the oxlint fallback path
-4. Enable Effect plugin/rules only when `effect` is a **direct** dependency
-5. Run `vp lint --fix` (or `oxlint --fix`) → formatter → lint again; fix owned source or relax specific rules sensibly — do not blanket-disable
-6. On Inertia kits, add `// SAFETY:` comments for known starter-kit assertions and apply these **narrow** relaxations (report them in the summary):
+1. `npx skills add dmmulroy/anti-slop --skill install-anti-slop`
+2. `node <skill>/scripts/install.mjs` → copies plugin to `tools/oxlint/anti-slop/` in the app
+3. Pin `@oxlint/plugins@<exact oxlint version>` as a devDependency (match installed oxlint, including vite-plus’s nested copy)
+4. Merge `ignorePatterns`, `jsPlugins`, and all generic `rules` into `vite.config` `lint` (and the same ignores into `fmt.ignorePatterns`), or into `.oxlintrc.json` on the oxlint fallback path
+5. Enable Effect plugin/rules only when `effect` is a **direct** dependency
+6. Record the resolved upstream **commit SHA** only in the generated app (`tools/oxlint/anti-slop/UPSTREAM.md`)
+7. Run `vp lint --fix` (or `oxlint --fix`) → formatter → lint again; fix owned source or relax specific rules sensibly — do not blanket-disable
+8. On Inertia kits, add `// SAFETY:` comments for known starter-kit assertions and apply these **narrow app-side** relaxations (report them in the summary):
    - `anti-slop/no-unsafe-dictionary-type=off` — Inertia `sharedPageProps` / `User` open index signatures
    - `anti-slop/no-runtime-typeof=off` — Inertia `href` string|object unions in kit helpers
 
-**Oddity flagged:** anti-slop’s source imports `@oxlint/plugins` and its install skill installs that package. vite-plus docs prefer `vite-plus/lint/plugins` imports; we follow anti-slop’s instructions and pin `@oxlint/plugins` exactly to the resolved oxlint version. Do not run anti-slop’s unrelated scripts beyond the documented copy + config.
+**Oddity flagged:** anti-slop’s source imports `@oxlint/plugins` and its install skill installs that package. vite-plus docs prefer `vite-plus/lint/plugins` imports; we follow anti-slop’s instructions and pin `@oxlint/plugins` exactly to the resolved oxlint version. Do not run anti-slop’s unrelated scripts beyond the documented fetch + copy + config.
+
+#### Docker (ServerSideUp)
+
+`setup-docker` writes production-ready [serversideup/php](https://serversideup.net/open-source/docker-php/) layout (see generated `DOCKER.md`):
+
+1. Multi-stage `Dockerfile`: Composer `--no-dev` (`serversideup/php:<php>-cli`) → Vite build (detected PM; when Wayfinder is present, a PHP+Node stage with full Composer deps so `artisan` boots) → final `serversideup/php:<php>-<variant>` runtime as `www-data`
+2. `.dockerignore` (no `.env` / secrets / `node_modules` / `vendor` / stale `bootstrap/cache/*.php`)
+3. `docker-compose.yml` — local bind-mount; DB service when not SQLite
+4. `docker-compose.prod.yml` — built image + **queue** (`queue:work` + `healthcheck-queue`) + **scheduler** (`schedule:work` + `healthcheck-schedule`), `AUTORUN_ENABLED=true` on web, `HEALTHCHECK_PATH=/up`, `PHP_OPCACHE_ENABLE=1`, env-driven secrets
+5. Pin tags to PHP **major.minor** + variant (never `:latest`)
+
+Default variant: **`fpm-nginx`**. Offer **`frankenphp`** in plan-and-confirm.
 
 #### Generated app CI
 
-`setup-tooling` also writes **`.github/workflows/ci.yml`** via `setup-ci-workflow` (see `reference/github/ci.yml.example`): parallel `php` and `js` jobs on `push` to `main` and `pull_request`. Check/dry-run only (`pint --test`, PHPStan, Rector `--dry-run` when installed, `php artisan test`, plus present JS scripts including `lint`, which covers anti-slop). Skips missing tools; uses the detected package manager and PHP version from `composer.json`.
+`setup-tooling` also writes **`.github/workflows/ci.yml`** via `setup-ci-workflow` (see `reference/github/ci.yml.example`): parallel `php` and `js` jobs on `push` to `main` and `pull_request`. Check/dry-run only (`pint --test`, PHPStan, Rector `--dry-run` when installed, `php artisan test`, plus present JS scripts including `lint`, which covers anti-slop). When a `Dockerfile` exists, adds an optional **`docker` job** that builds the image only (no push). Skips missing tools; uses the detected package manager and PHP version from `composer.json`.
 
 ### 4) Summarize for the user
 
-App path, kit, commits (or skipped), PHP defaults present, Boost/Wayfinder/JS tooling/anti-slop/CI status, any anti-slop rules relaxed and why, PHP + `test:js` / format / lint / types / build results.
+App path, kit, commits (or skipped), PHP defaults present, Boost/Wayfinder/JS tooling/anti-slop/Docker/CI status, anti-slop commit fetched + any rules relaxed, PHP + `test:js` / format / lint / types / build / `docker build` results.
 
 ## Rules
 
@@ -178,5 +200,6 @@ App path, kit, commits (or skipped), PHP defaults present, Boost/Wayfinder/JS to
 - Keep PHP tests (`php artisan test`) and JS tests (`npm run test:js`) separate.
 - Prefer `vp` whenever `vite-plus` is present; only install oxfmt/oxlint/Vitest directly as a fallback.
 - Follow the kit package manager from the lockfile (default npm); switch to pnpm/yarn/bun only on explicit user request (`--pm`).
-- Generated app CI must stay check/dry-run only (never write or auto-fix).
-- anti-slop: vendor + `@oxlint/plugins` pin + config merge only; report oddities; keep lint green by fixing or narrowly relaxing rules.
+- Generated app CI must stay check/dry-run only (never write or auto-fix); docker CI builds without pushing.
+- anti-slop: fetch latest upstream into the app (no skill-vendored rules) + `@oxlint/plugins` pin + config merge; record commit in the app; report oddities; keep lint green by fixing or narrowly relaxing rules.
+- Docker: ServerSideUp guidance only; no secrets in the image; prefer a dedicated docker commit.

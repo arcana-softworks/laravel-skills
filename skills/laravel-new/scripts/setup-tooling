@@ -5,8 +5,9 @@
 #   setup-tooling [--dir <app>] [--agents cursor,claude_code,codex]
 #                 [--pm npm|pnpm|yarn|bun] [--skip <step>]...
 #
-# Skippable step ids: boost | wayfinder | js-fmt-lint | anti-slop | vitest | ci
+# Skippable step ids: boost | wayfinder | js-fmt-lint | anti-slop | vitest | ci | docker
 # Legacy flags --skip-boost / --skip-wayfinder still work.
+# Optional: --docker-variant fpm-nginx|frankenphp|fpm-apache|cli (default fpm-nginx)
 #
 # Package manager: detect from lockfile (default npm). Pass --pm only when the
 # user explicitly requests a different manager (e.g. pnpm).
@@ -21,6 +22,7 @@ source "${SCRIPT_DIR}/lib/steps.sh"
 APP_DIR="$(pwd)"
 AGENTS="cursor,claude_code,codex"
 FORCE_PM=""
+DOCKER_VARIANT="fpm-nginx"
 
 parse_skip_args "$@"
 set -- "${STEPS_REMAINING_ARGS[@]}"
@@ -30,7 +32,8 @@ while [[ $# -gt 0 ]]; do
     --dir) APP_DIR="$2"; shift 2 ;;
     --agents) AGENTS="$2"; shift 2 ;;
     --pm) FORCE_PM="$2"; shift 2 ;;
-    -h|--help) sed -n '2,14p' "$0"; exit 0 ;;
+    --docker-variant) DOCKER_VARIANT="$2"; shift 2 ;;
+    -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
     *) echo "Unknown arg: $1" >&2; exit 1 ;;
   esac
 done
@@ -177,6 +180,22 @@ if step_enabled ci; then
   "${SCRIPT_DIR}/setup-ci-workflow" --dir "$APP_DIR"
 else
   warn "Skipping CI workflow (--skip ci)"
+fi
+
+# ---------- Docker (ServerSideUp) — after CI so the workflow can detect Dockerfile ----------
+if step_enabled docker; then
+  log "Writing ServerSideUp Docker layout (variant=${DOCKER_VARIANT})..."
+  chmod +x "${SCRIPT_DIR}/setup-docker"
+  docker_args=(--dir "$APP_DIR" --variant "$DOCKER_VARIANT")
+  [[ -n "$FORCE_PM" ]] && docker_args+=(--pm "$FORCE_PM")
+  "${SCRIPT_DIR}/setup-docker" "${docker_args[@]}"
+  # Regenerate CI so the optional docker build job is included once Dockerfile exists.
+  if step_enabled ci; then
+    log "Refreshing CI workflow to include docker build job..."
+    "${SCRIPT_DIR}/setup-ci-workflow" --dir "$APP_DIR"
+  fi
+else
+  warn "Skipping Docker (--skip docker)"
 fi
 
 # ---------- Env / key / sqlite / migrate / build / test ----------

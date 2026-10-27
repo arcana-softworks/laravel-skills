@@ -25,7 +25,7 @@ More skills will land under `skills/` over time. Each skill is self-contained (`
 
 ## laravel-new
 
-Scaffolds a new Laravel app (any official or community starter kit), applies **sensible Laravel source defaults**, then sets up Boost, Wayfinder (when needed), JS tooling via **vite-plus (`vp`)** when the kit ships it (oxfmt/oxlint/Vitest fallback otherwise), vendored **[anti-slop](https://github.com/dmmulroy/anti-slop)** Oxlint rules, and a generated app CI workflow.
+Scaffolds a new Laravel app (any official or community starter kit), applies **sensible Laravel source defaults**, then sets up Boost, Wayfinder (when needed), JS tooling via **vite-plus (`vp`)** when the kit ships it (oxfmt/oxlint/Vitest fallback otherwise), **[anti-slop](https://github.com/dmmulroy/anti-slop)** Oxlint rules fetched fresh from upstream at run time, and a generated app CI workflow.
 
 | Agent | Typical path | Flag |
 |-------|--------------|------|
@@ -44,10 +44,11 @@ Before changing anything, the skill presents a numbered plan of all steps (scaff
 | `boost` | Install Laravel Boost and configure agents |
 | `wayfinder` | Install Wayfinder when Inertia + Vite |
 | `js-fmt-lint` | Configure oxfmt/oxlint via `vp` (or ox* fallback) |
-| `anti-slop` | Vendor dmmulroy/anti-slop and wire into vp/oxlint |
+| `anti-slop` | Fetch latest dmmulroy/anti-slop into the app and wire into vp/oxlint |
 | `vitest` | Add Vitest smoke tests and `test:js` |
 | `ci` | Write `.github/workflows/ci.yml` |
-| `commits` | Three-commit layout: scaffold → essentials → tooling |
+| `docker` | ServerSideUp PHP Docker image + compose (queue/scheduler) |
+| `commits` | Commit layout: scaffold → essentials → tooling → docker |
 
 Helper: `skills/laravel-new/scripts/print-plan --app my-app --kit react`.
 
@@ -56,6 +57,7 @@ Helper: `skills/laravel-new/scripts/print-plan --app my-app --kit react`.
 1. **Scaffold** — `laravel new` (or `composer create-project`). Default kit: Inertia React. Commit 1.
 2. **Essentials** — self-contained PHP snippets / `apply-essentials` (strict models, immutable dates, safe console, HTTPS, Vite prefetch, test Http/Sleep nets, `make:action`, Pint). One atomic commit.
 3. **Tooling** — Boost, Wayfinder on Inertia/Vite if missing, **vite-plus `vp`** JS tooling (or oxfmt/oxlint/Vitest fallback), **anti-slop**, generated app **`.github/workflows/ci.yml`**, build, PHP tests. Separate commit.
+4. **Docker** (optional step) — [ServerSideUp PHP](https://serversideup.net/open-source/docker-php/) multi-stage image (`fpm-nginx` default; offer `frankenphp`), compose for local + prod (queue + scheduler), dedicated commit preferred.
 
 ### JS standard
 
@@ -69,7 +71,7 @@ Helper: `skills/laravel-new/scripts/print-plan --app my-app --kit react`.
 
 On vite-plus kits, configure `fmt` / `lint` / `test` in `vite.config` (enable `lint.options.typeAware` + `typeCheck`). Do **not** add direct `oxfmt` / `oxlint` / `oxlint-tsgolint` deps or `.oxfmtrc.json` / `.oxlintrc.json`. PHP stays on Pest/PHPUnit via `php artisan test`.
 
-**anti-slop:** vendored to `tools/oxlint/anti-slop` (skill ships `reference/anti-slop/`), pins `@oxlint/plugins` to the resolved oxlint version, merges ignores / `jsPlugins` / rules into `vite.config` `lint` (and ignores into `fmt`). Effect rules only when `effect` is a direct dependency. CI `lint` job runs the same `npm run lint` / `vp lint` path.
+**anti-slop:** at run time fetches latest via `npx skills add dmmulroy/anti-slop --skill install-anti-slop` + `install.mjs` into the app’s `tools/oxlint/anti-slop/` (no stale copy in the skill), pins `@oxlint/plugins` to the resolved oxlint version, merges ignores / `jsPlugins` / rules into `vite.config` `lint` (and ignores into `fmt`), and records the upstream commit in the app’s `UPSTREAM.md`. Effect rules only when `effect` is a direct dependency. CI `lint` job runs the same `npm run lint` / `vp lint` path.
 
 ### Package manager
 
@@ -77,7 +79,11 @@ Scripts detect the JS package manager from the lockfile (`package-lock.json` →
 
 ### Generated app CI
 
-`setup-ci-workflow` writes `.github/workflows/ci.yml` with parallel **php** and **js** jobs (check/dry-run only). It enables Pint `--test`, PHPStan, Rector `--dry-run`, and PHPUnit/Pest via `php artisan test` when those tools exist, plus whichever of `format:check` / `lint` / `types` / `test:js` / `build` are present as package scripts. Actions use Node-24-compatible majors (`actions/checkout@v5`, `actions/setup-node@v5`, `actions/cache@v5`).
+`setup-ci-workflow` writes `.github/workflows/ci.yml` with parallel **php** and **js** jobs (check/dry-run only). It enables Pint `--test`, PHPStan, Rector `--dry-run`, and PHPUnit/Pest via `php artisan test` when those tools exist, plus whichever of `format:check` / `lint` / `types` / `test:js` / `build` are present as package scripts. When a `Dockerfile` exists, it also adds a **docker** job that builds the production target only (no push). Actions use Node-24-compatible majors (`actions/checkout@v5`, `actions/setup-node@v5`, `actions/cache@v5`).
+
+### Docker (ServerSideUp)
+
+`setup-docker` writes `Dockerfile` (Composer `--no-dev` + Vite build — PHP+Node stage when Wayfinder needs `artisan` during `vp build` — + `serversideup/php:<php>-<variant>`), `.dockerignore`, `docker-compose.yml` (dev bind-mount), `docker-compose.prod.yml` (app + queue + scheduler, `AUTORUN_ENABLED`, `HEALTHCHECK_PATH=/up`), and `DOCKER.md`. Default variant **`fpm-nginx`**; plan can choose **`frankenphp`**. No secrets baked into the image.
 
 ### Layout
 
@@ -85,13 +91,13 @@ Scripts detect the JS package manager from the lockfile (`package-lock.json` →
 skills/laravel-new/
   SKILL.md
   scripts/scaffold-app | apply-essentials | setup-tooling | setup-js-tooling
-         | setup-anti-slop | setup-ci-workflow | print-plan
+         | setup-anti-slop | setup-ci-workflow | setup-docker | print-plan
   scripts/lib/package-manager.sh   # lockfile PM detect + --pm switch
   scripts/lib/steps.sh             # step ids + --skip parsing
   reference/ESSENTIALS.md          # paste-ready PHP snippets
   reference/stubs/                 # pint, rector, make:action
   reference/js/                    # ox* configs (fallback) + Vitest smoke
-  reference/anti-slop/             # vendored dmmulroy/anti-slop plugin copy
+  reference/docker/                # .dockerignore template
   reference/github/ci.yml.example  # shape of generated app CI
 ```
 

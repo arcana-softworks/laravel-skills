@@ -5,9 +5,6 @@
 *.sqlite
 .env
 vendor/
-# Keep anti-slop's vendored eslint-stylistic copy (LICENSE + provenance required).
-!skills/laravel-new/reference/anti-slop/vendor/
-!skills/laravel-new/reference/anti-slop/vendor/**
 node_modules/
 .cache/
 /tmp/
