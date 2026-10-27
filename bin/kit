@@ -135,7 +135,7 @@ apply_one_patch() {
   fi
   # Some patch versions print "Ignoring" for already-applied and still exit 0/1;
   # treat any .rej or "FAILED" as failure.
-  if rg -q "FAILED|rejected|hunk ignored|can't find file" /tmp/kit-apply.err; then
+  if grep -Eq "FAILED|rejected|hunk ignored|can't find file" /tmp/kit-apply.err; then
     return 1
   fi
   # If dry evidence of skip-without-change, verify a sentinel for known patches
@@ -178,7 +178,8 @@ apply_patches() {
   fi
 
   # Sanity: Essentials runtime patch must leave a detectable marker
-  if ! rg -q "Model::shouldBeStrict" "${target}/app/Providers/AppServiceProvider.php"; then
+  # Use grep (not ripgrep) so CI runners without rg still work.
+  if ! grep -Fq "Model::shouldBeStrict" "${target}/app/Providers/AppServiceProvider.php"; then
     err "Patches reported OK but AppServiceProvider is missing Model::shouldBeStrict — apply was skipped."
     err "Ensure the target is a git work tree or that GNU patch applied hunks."
     return 1
