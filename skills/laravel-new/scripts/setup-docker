@@ -584,4 +584,27 @@ print(f"DockerDb={db}")
 print(f"DockerPm={pm}")
 PY
 
+# Match the app's JS formatter (vp fmt / oxfmt) so format:check stays green.
+# setup-docker runs after setup-js-tooling, so the formatter binary is usually present.
+format_docker_artifacts() {
+  local targets=()
+  local f
+  for f in DOCKER.md docker-compose.yml docker-compose.prod.yml; do
+    [[ -f "$f" ]] && targets+=("$f")
+  done
+  [[ ${#targets[@]} -gt 0 ]] || return 0
+
+  if [[ -x node_modules/.bin/vp ]]; then
+    log "Formatting Docker artifacts with vp fmt..."
+    npx --no-install vp fmt "${targets[@]}"
+  elif [[ -x node_modules/.bin/oxfmt ]]; then
+    log "Formatting Docker artifacts with oxfmt..."
+    npx --no-install oxfmt "${targets[@]}"
+  else
+    warn "No vp/oxfmt in node_modules — skip formatting Docker artifacts (run format after JS tooling)"
+    return 0
+  fi
+}
+format_docker_artifacts
+
 ok "Docker layout ready (ServerSideUp ${VARIANT})"
