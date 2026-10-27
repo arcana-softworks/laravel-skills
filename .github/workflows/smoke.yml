@@ -59,7 +59,7 @@ jobs:
           git commit -m "Apply sensible Laravel defaults (strict models, immutable dates, make:action, Pint)"
           "$SKILL/scripts/setup-tooling" --dir "$APP" --agents cursor
           git add -A
-          git diff --cached --quiet || git commit -m "Install Boost, Wayfinder, oxfmt/oxlint/Jest, and project tooling"
+          git diff --cached --quiet || git commit -m "Install Boost, Wayfinder, vite-plus/vp JS tooling, anti-slop, and project tooling"
           php artisan test
           vendor/bin/pint --parallel --test
           vendor/bin/phpstan analyse
@@ -68,6 +68,38 @@ jobs:
           npm run types
           npm run test:js
           npm run build
+          # vite-plus path: scripts call vp; no direct ox*/Jest deps or separate ox configs
+          grep -q '"format": "vp fmt"' package.json
+          grep -q '"format:check": "vp fmt --check"' package.json
+          grep -q '"lint": "vp lint"' package.json
+          grep -q '"types": "vp check --no-fmt --no-lint"' package.json
+          grep -q '"test:js": "LARAVEL_BYPASS_ENV_CHECK=1 vp test"' package.json
+          ! grep -E '"oxfmt"|"oxlint"|"oxlint-tsgolint"|"jest"|@swc/jest|jest-environment-jsdom|"@types/jest"' package.json
+          test ! -e .oxfmtrc.json
+          test ! -e .oxlintrc.json
+          test ! -e jest.config.cjs
+          test ! -e jest.config.js
+          test ! -e resources/js/jest.setup.ts
+          grep -q 'typeCheck: true' vite.config.ts
+          test -f package-lock.json
+          # anti-slop (vendored) wired into vp lint
+          test -f tools/oxlint/anti-slop/index.ts
+          grep -q '@oxlint/plugins' package.json
+          grep -q "tools/oxlint/anti-slop" vite.config.ts
+          grep -q "anti-slop/require-readable-spacing" vite.config.ts
+          # plan-and-confirm helper lists step ids
+          "$SKILL/scripts/print-plan" --app smoke-react --kit react | grep -q '\[anti-slop\]'
+          "$SKILL/scripts/print-plan" --app smoke-react --kit react --skip boost --skip vitest | grep -q 'Already skipped: boost vitest'
+          # Generated app CI workflow (check/dry-run only); lint job covers anti-slop via vp lint
+          test -f .github/workflows/ci.yml
+          grep -q 'pint --parallel --test' .github/workflows/ci.yml
+          grep -q 'format:check' .github/workflows/ci.yml
+          grep -q 'test:js' .github/workflows/ci.yml
+          grep -q 'run: npm run lint' .github/workflows/ci.yml
+          grep -q 'phpstan analyse' .github/workflows/ci.yml
+          ! grep -E 'pint --parallel[[:space:]]*$|pint --parallel --dirty|oxfmt[[:space:]]*$|vp fmt[[:space:]]*$|check:fix|--fix' .github/workflows/ci.yml
+          # Default path is npm (lockfile); scripts must not require --legacy-peer-deps
+          ! grep -R -- '--legacy-peer-deps' "$SKILL/scripts"
           php artisan tinker --execute '
           $id = App\Models\User::factory()->create()->id;
           $u = App\Models\User::query()->findOrFail($id);

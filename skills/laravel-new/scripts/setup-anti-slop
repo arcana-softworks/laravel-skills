@@ -1,0 +1,562 @@
+#!/usr/bin/env bash
+# setup-anti-slop — vendor dmmulroy/anti-slop Oxlint rules and wire them into
+# vite-plus lint config (or .oxlintrc.json / oxlint.config.ts fallback).
+#
+# Follows https://github.com/dmmulroy/anti-slop manual/skill install steps:
+# copy plugin → install matching @oxlint/plugins → merge jsPlugins/rules/ignores.
+#
+# Usage:
+#   setup-anti-slop [--dir <app>] [--pm npm|pnpm|yarn|bun]
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/package-manager.sh
+source "${SCRIPT_DIR}/lib/package-manager.sh"
+REF_ANTI="${SCRIPT_DIR}/../reference/anti-slop"
+
+APP_DIR="$(pwd)"
+FORCE_PM=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --dir) APP_DIR="$2"; shift 2 ;;
+    --pm) FORCE_PM="$2"; shift 2 ;;
+    -h|--help) sed -n '2,10p' "$0"; exit 0 ;;
+    *) echo "Unknown arg: $1" >&2; exit 1 ;;
+  esac
+done
+
+APP_DIR="$(cd "$APP_DIR" && pwd)"
+cd "$APP_DIR"
+export FORCE_PM
+
+RED=$'\033[0;31m'; GRN=$'\033[0;32m'; YLW=$'\033[0;33m'; BLU=$'\033[0;34m'; NC=$'\033[0m'
+log()  { printf '%s%s%s\n' "$BLU" "$*" "$NC" >&2; }
+ok()   { printf '%s%s%s\n' "$GRN" "$*" "$NC" >&2; }
+warn() { printf '%s%s%s\n' "$YLW" "$*" "$NC" >&2; }
+
+[[ -f package.json ]] || { warn "No package.json — skipping anti-slop"; exit 0; }
+[[ -d "$REF_ANTI" ]] || { printf '%s%s%s\n' "$RED" "Missing skill reference/anti-slop" "$NC" >&2; exit 1; }
+
+resolve_package_manager
+log "Installing anti-slop (package manager: ${PM})"
+
+DEST="tools/oxlint/anti-slop"
+if [[ -d "$DEST" ]]; then
+  ok "anti-slop already present at ${DEST} (leaving in place)"
+else
+  log "Vendoring anti-slop → ${DEST}"
+  mkdir -p "$(dirname "$DEST")"
+  cp -a "${REF_ANTI}/." "$DEST"
+fi
+
+# Resolve Oxlint version to pin @oxlint/plugins exactly (anti-slop install skill).
+resolve_oxlint_version() {
+  python3 <<'PY'
+import json
+from pathlib import Path
+
+def pkg_version(path):
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8")).get("version")
+    except Exception:
+        return None
+
+# Prefer the oxlint that vite-plus / the project actually loads.
+for candidate in (
+    "node_modules/oxlint/package.json",
+    "node_modules/vite-plus/node_modules/oxlint/package.json",
+):
+    v = pkg_version(candidate)
+    if v:
+        print(v)
+        raise SystemExit(0)
+
+data = json.loads(Path("package.json").read_text(encoding="utf-8"))
+deps = {**data.get("dependencies", {}), **data.get("devDependencies", {})}
+for name in ("oxlint",):
+    if name in deps:
+        # strip range markers for a best-effort pin
+        raw = deps[name].lstrip("^~>=<")
+        print(raw.split()[0])
+        raise SystemExit(0)
+
+# Last resort: current npm registry version
+import subprocess
+print(subprocess.check_output(["npm", "view", "oxlint", "version"], text=True).strip())
+PY
+}
+
+OX_VER="$(resolve_oxlint_version)"
+log "Pinning @oxlint/plugins@${OX_VER} exactly to match oxlint"
+# Exact version (anti-slop install skill): avoid caret ranges so upgrades move together.
+case "$PM" in
+  npm) npm install -D --save-exact "@oxlint/plugins@${OX_VER}" ;;
+  pnpm) pnpm add -D "@oxlint/plugins@${OX_VER}" ;;
+  yarn) yarn add -D --exact "@oxlint/plugins@${OX_VER}" ;;
+  bun) bun add -d "@oxlint/plugins@${OX_VER}" ;;
+  *) pm_add_dev "@oxlint/plugins@${OX_VER}" ;;
+esac
+# Normalize package.json to an exact version string if a range sneaked in.
+python3 - "$OX_VER" <<'PY'
+import json, sys
+from pathlib import Path
+ver = sys.argv[1]
+path = Path("package.json")
+data = json.loads(path.read_text(encoding="utf-8"))
+for bucket in ("dependencies", "devDependencies"):
+    deps = data.get(bucket) or {}
+    if "@oxlint/plugins" in deps:
+        deps["@oxlint/plugins"] = ver
+        data[bucket] = deps
+path.write_text(json.dumps(data, indent=4) + "\n", encoding="utf-8")
+print(f"package.json: @oxlint/plugins={ver}")
+PY
+
+# Oddity flag: vite-plus docs prefer vite-plus/lint/plugins imports, but anti-slop's
+# vendored source imports @oxlint/plugins and its install skill installs that package.
+warn "Note: anti-slop imports @oxlint/plugins (per upstream). vite-plus docs prefer vite-plus/lint/plugins; we follow anti-slop."
+
+HAS_VITE_PLUS=0
+if python3 - <<'PY'
+import json
+from pathlib import Path
+data = json.loads(Path("package.json").read_text(encoding="utf-8"))
+deps = {**data.get("dependencies", {}), **data.get("devDependencies", {})}
+raise SystemExit(0 if "vite-plus" in deps else 1)
+PY
+then
+  HAS_VITE_PLUS=1
+fi
+
+HAS_EFFECT=0
+if python3 - <<'PY'
+import json
+from pathlib import Path
+data = json.loads(Path("package.json").read_text(encoding="utf-8"))
+# Direct dependency only (anti-slop skill: not transitive lockfile).
+deps = {**data.get("dependencies", {}), **data.get("devDependencies", {})}
+raise SystemExit(0 if "effect" in deps else 1)
+PY
+then
+  HAS_EFFECT=1
+fi
+
+# Inertia kits use open dictionaries on shared props / User bags and typeof for
+# href unions — narrow relaxations (not blanket disable). Recorded below.
+HAS_INERTIA=0
+if python3 - <<'PY'
+import json
+from pathlib import Path
+data = json.loads(Path("package.json").read_text(encoding="utf-8"))
+deps = {**data.get("dependencies", {}), **data.get("devDependencies", {})}
+raise SystemExit(0 if any(k.startswith("@inertiajs/") or k == "inertiajs/inertia-laravel" for k in deps) or Path("vendor/inertiajs").is_dir() else 1)
+PY
+then
+  HAS_INERTIA=1
+fi
+# PHP-side inertia package
+if grep -q 'inertiajs/inertia-laravel' composer.json 2>/dev/null; then
+  HAS_INERTIA=1
+fi
+
+RELAXED_RULES=()
+python3 - "$HAS_VITE_PLUS" "$HAS_EFFECT" "$HAS_INERTIA" <<'PY'
+from __future__ import annotations
+
+import json
+import re
+import sys
+from pathlib import Path
+
+has_vite_plus = sys.argv[1] == "1"
+has_effect = sys.argv[2] == "1"
+has_inertia = sys.argv[3] == "1"
+relaxed: list[str] = []
+
+AGENT_IGNORES = [
+    ".agent/**",
+    ".agents/**",
+    ".claude/**",
+    ".codex/**",
+    ".continue/**",
+    ".cursor/**",
+    ".gemini/**",
+    ".opencode/**",
+    ".pi/**",
+    ".roo/**",
+    ".windsurf/**",
+    "tools/oxlint/anti-slop/**",
+]
+
+GENERIC_RULES = {
+    "oxc/no-accumulating-spread": "error",
+    "anti-slop/no-array-filter-map": "error",
+    "anti-slop/no-reduce-accumulator-copy": "error",
+    "anti-slop/no-chained-type-assertions": "error",
+    "anti-slop/no-conditional-empty-object-spread": "error",
+    "anti-slop/no-known-value-widening": "error",
+    "anti-slop/no-module-mocking": "error",
+    "anti-slop/no-object-parameters": "error",
+    "anti-slop/no-reflect-apply": "error",
+    "anti-slop/no-reflect-get": "error",
+    "anti-slop/no-runtime-typeof": "error",
+    "anti-slop/no-shape-in-symbol-names": "error",
+    "anti-slop/no-unknown-parameters": "error",
+    "anti-slop/no-unknown-returns": "error",
+    "anti-slop/no-unknown-type-aliases": "error",
+    "anti-slop/no-unsafe-dictionary-type": "error",
+    "anti-slop/no-widen-then-assert": "error",
+    "anti-slop/require-readable-spacing": "error",
+    "anti-slop/require-safety-comment-for-type-assertion": "error",
+}
+
+EFFECT_RULES = {
+    "anti-slop-effect/no-manual-effect-error-tag": "error",
+    "anti-slop-effect/no-manual-tag-comparison": "error",
+    "anti-slop-effect/no-manual-tagged-construction": "error",
+    "anti-slop-effect/no-service-constructor-imports": "error",
+    "anti-slop-effect/prefer-effect-match": "error",
+}
+
+rules = dict(GENERIC_RULES)
+if has_effect:
+    rules.update(EFFECT_RULES)
+
+if has_inertia:
+    # Inertia sharedPageProps / User models intentionally use open dictionaries
+    # for server-driven bags; enforcing a closed value contract rejects the kit.
+    rules["anti-slop/no-unsafe-dictionary-type"] = "off"
+    relaxed.append(
+        "anti-slop/no-unsafe-dictionary-type=off (Inertia shared props / User index signatures)"
+    )
+    # Kits use `typeof url === 'string'` for Inertia href unions (string | {url}).
+    # Existence probes are already allowed; representation narrowing on href is not.
+    rules["anti-slop/no-runtime-typeof"] = "off"
+    relaxed.append(
+        "anti-slop/no-runtime-typeof=off (Inertia href string|object unions in kit helpers)"
+    )
+
+# Detect extra agent tooling dirs in the project root.
+extra = []
+for name in (".junie", ".aider", ".continue"):
+    if Path(name).is_dir() and f"{name}/**" not in AGENT_IGNORES:
+        extra.append(f"{name}/**")
+
+ignores = AGENT_IGNORES + extra
+
+def merge_ignore_list(existing: list[str] | None) -> list[str]:
+    out = list(existing or [])
+    for pat in ignores:
+        if pat not in out:
+            out.append(pat)
+    return out
+
+def rewrite_ignore_patterns_array(array_body: str) -> str:
+    """Rebuild an ignorePatterns array literal, merging anti-slop agent ignores."""
+    existing = re.findall(r"['\"]([^'\"]+)['\"]", array_body)
+    merged = merge_ignore_list(existing)
+    inner = ",\n            ".join(json.dumps(p) for p in merged)
+    return f"ignorePatterns: [\n            {inner},\n        ]"
+
+def merge_ignore_patterns_in_section(section: str) -> str:
+    """Rewrite the first ignorePatterns: [...] inside a config section."""
+    def repl(m: re.Match[str]) -> str:
+        return rewrite_ignore_patterns_array(m.group(0))
+
+    text2, n = re.subn(
+        r"ignorePatterns\s*:\s*\[[^\]]*\]",
+        repl,
+        section,
+        count=1,
+        flags=re.S,
+    )
+    if n:
+        return text2
+    # No ignorePatterns yet — prepend one after the opening brace of the caller.
+    return section
+
+if has_vite_plus:
+    candidates = [Path(p) for p in ("vite.config.ts", "vite.config.js", "vite.config.mts", "vite.config.mjs")]
+    path = next((p for p in candidates if p.is_file()), None)
+    if path is None:
+        raise SystemExit("vite-plus present but no vite.config.* found")
+    text = path.read_text(encoding="utf-8")
+    if "anti-slop" in text and "tools/oxlint/anti-slop" in text and "jsPlugins:" in text:
+        # Still refresh ignores if a previous broken run left them incomplete.
+        print(f"{path}: anti-slop already referenced — refreshing ignorePatterns")
+        # Fall through to merge ignores + ensure rules present
+        already = True
+    else:
+        already = False
+
+    plugin_entries = [
+        "{ name: 'anti-slop', specifier: './tools/oxlint/anti-slop/index.ts' }",
+    ]
+    if has_effect:
+        plugin_entries.append(
+            "{ name: 'anti-slop-effect', specifier: './tools/oxlint/anti-slop/effect/index.ts' }"
+        )
+    plugins_js = ",\n            ".join(plugin_entries)
+    rules_js = ",\n            ".join(f"'{k}': '{v}'" for k, v in rules.items())
+
+    block = f"""
+        // anti-slop (vendored) — see tools/oxlint/anti-slop/UPSTREAM.md
+        jsPlugins: [
+            {plugins_js},
+        ],
+        rules: {{
+            {rules_js},
+        }},
+"""
+
+    if not re.search(r"\blint\s*:", text):
+        raise SystemExit(f"No lint block in {path} — run setup-js-tooling first")
+
+    # Split on lint: { ... } roughly by finding lint and fmt/test boundaries.
+    lint_m = re.search(r"\blint\s*:\s*\{", text)
+    if not lint_m:
+        raise SystemExit(f"Could not locate lint block in {path}")
+
+    # Merge ignorePatterns inside the lint section (until next top-level key at same indent or end).
+    # Operate on the whole file for the first ignorePatterns after lint: — then fmt separately.
+    lint_start = lint_m.end()
+    # Find matching closing brace for lint object (simple brace depth).
+    depth = 1
+    i = lint_start
+    while i < len(text) and depth:
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+        i += 1
+    lint_end = i  # position after closing }
+    lint_section = text[lint_m.start():lint_end]
+
+    if re.search(r"ignorePatterns\s*:\s*\[", lint_section):
+        lint_section2 = merge_ignore_patterns_in_section(lint_section)
+    else:
+        lint_section2 = re.sub(
+            r"(lint\s*:\s*\{)",
+            r"\1\n        "
+            + rewrite_ignore_patterns_array("ignorePatterns: []")
+            + ",",
+            lint_section,
+            count=1,
+        )
+
+    if "jsPlugins:" not in lint_section2 or "anti-slop" not in lint_section2:
+        lint_section2 = re.sub(
+            r"(lint\s*:\s*\{)",
+            r"\1" + block,
+            lint_section2,
+            count=1,
+        )
+    else:
+        # Refresh rules object so Inertia relaxations apply on re-runs.
+        def replace_rules(m: re.Match[str]) -> str:
+            return f"rules: {{\n            {rules_js},\n        }}"
+
+        lint_section2, n_rules = re.subn(
+            r"rules\s*:\s*\{[^{}]*\}",
+            replace_rules,
+            lint_section2,
+            count=1,
+            flags=re.S,
+        )
+        if not n_rules:
+            lint_section2 = re.sub(
+                r"(lint\s*:\s*\{)",
+                r"\1" + block,
+                lint_section2,
+                count=1,
+            )
+
+
+    text = text[: lint_m.start()] + lint_section2 + text[lint_end:]
+
+    # Merge fmt.ignorePatterns
+    fmt_m = re.search(r"\bfmt\s*:\s*\{", text)
+    if fmt_m:
+        depth = 1
+        i = fmt_m.end()
+        while i < len(text) and depth:
+            if text[i] == "{":
+                depth += 1
+            elif text[i] == "}":
+                depth -= 1
+            i += 1
+        fmt_end = i
+        fmt_section = text[fmt_m.start():fmt_end]
+        if re.search(r"ignorePatterns\s*:\s*\[", fmt_section):
+            fmt_section2 = merge_ignore_patterns_in_section(fmt_section)
+        else:
+            fmt_section2 = re.sub(
+                r"(fmt\s*:\s*\{)",
+                r"\1\n        "
+                + rewrite_ignore_patterns_array("ignorePatterns: []")
+                + ",",
+                fmt_section,
+                count=1,
+            )
+        text = text[: fmt_m.start()] + fmt_section2 + text[fmt_end:]
+
+    path.write_text(text, encoding="utf-8")
+    print(f"{path}: registered anti-slop jsPlugins + rules + ignores" + (" (refreshed)" if already else ""))
+    if relaxed:
+        print("RelaxedRules:")
+        for item in relaxed:
+            print(f"  - {item}")
+else:
+    # Fallback oxlintrc / oxlint.config
+    cfg_path = Path(".oxlintrc.json")
+    if cfg_path.is_file():
+        cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+    else:
+        cfg = {}
+    cfg["ignorePatterns"] = merge_ignore_list(cfg.get("ignorePatterns"))
+    plugins = cfg.get("jsPlugins") or []
+    # Normalize to object entries
+    spec = "./tools/oxlint/anti-slop/index.ts"
+    if not any(
+        (isinstance(p, str) and "anti-slop" in p)
+        or (isinstance(p, dict) and "anti-slop" in json.dumps(p))
+        for p in plugins
+    ):
+        plugins.append({"name": "anti-slop", "specifier": spec})
+        if has_effect:
+            plugins.append(
+                {
+                    "name": "anti-slop-effect",
+                    "specifier": "./tools/oxlint/anti-slop/effect/index.ts",
+                }
+            )
+    cfg["jsPlugins"] = plugins
+    cfg_rules = cfg.get("rules") or {}
+    cfg_rules.update(rules)
+    cfg["rules"] = cfg_rules
+    cfg_path.write_text(json.dumps(cfg, indent=2) + "\n", encoding="utf-8")
+    print(f"{cfg_path}: registered anti-slop")
+    if relaxed:
+        print("RelaxedRules:")
+        for item in relaxed:
+            print(f"  - {item}")
+
+# Refresh UPSTREAM.md with install path note (keep bundled provenance)
+up = Path("tools/oxlint/anti-slop/UPSTREAM.md")
+if up.is_file():
+    body = up.read_text(encoding="utf-8")
+    if "Installed by laravel-new" not in body:
+        up.write_text(
+            body.rstrip()
+            + "\n\nInstalled by laravel-new setup-anti-slop.\n"
+            + f"@oxlint/plugins pinned to match local oxlint.\n",
+            encoding="utf-8",
+        )
+print("anti-slop configure done")
+PY
+
+# Add SAFETY comments for kit type assertions that lack them (common on Laravel
+# React starter hooks). Idempotent: skips lines that already have a nearby SAFETY.
+python3 <<'PY'
+from pathlib import Path
+import re
+
+# (path, line_substring_marker, safety_reason) — match first unmarked assertion near marker.
+TARGETS = [
+    (
+        "resources/js/hooks/use-appearance.tsx",
+        "localStorage.getItem('appearance') as Appearance",
+        "localStorage appearance values are constrained to Appearance by the setter below.",
+    ),
+    (
+        "resources/js/hooks/use-flash-toast.ts",
+        "(event as CustomEvent)",
+        "Inertia flash listener always receives a CustomEvent with detail.flash.",
+    ),
+    (
+        "resources/js/hooks/use-flash-toast.ts",
+        "flash?.toast as FlashToast",
+        "Flash toast payloads are shaped as FlashToast by the backend share.",
+    ),
+    (
+        "resources/js/hooks/use-current-url.ts",
+        "null as TIfFalse",
+        "Default branch for whenCurrentUrl is the caller-provided TIfFalse (null by default).",
+    ),
+    (
+        "resources/js/hooks/use-two-factor-auth.ts",
+        "await submit(qrCode())) as {",
+        "Wayfinder qrCode() JSON body matches { svg, url } from Fortify two-factor setup.",
+    ),
+    (
+        "resources/js/hooks/use-two-factor-auth.ts",
+        "await submit(secretKey())) as {",
+        "Wayfinder secretKey() JSON body matches { secretKey } from Fortify.",
+    ),
+    (
+        "resources/js/hooks/use-two-factor-auth.ts",
+        "await submit(recoveryCodes())) as string[]",
+        "Wayfinder recoveryCodes() returns a string[] of recovery codes.",
+    ),
+]
+
+def ensure_safety(path: Path, marker: str, reason: str) -> bool:
+    if not path.is_file():
+        return False
+    text = path.read_text(encoding="utf-8")
+    idx = text.find(marker)
+    if idx < 0:
+        return False
+    # Look at the preceding non-empty line for an existing SAFETY comment.
+    before = text[:idx]
+    prev_line = before.rstrip().splitlines()[-1] if before.strip() else ""
+    if "SAFETY:" in prev_line:
+        return False
+    # Insert immediately before the start of the line containing the marker.
+    line_start = before.rfind("\n") + 1
+    indent_m = re.match(r"[ \t]*", text[line_start:])
+    indent = indent_m.group(0) if indent_m else ""
+    comment = f"{indent}// SAFETY: {reason}\n"
+    path.write_text(text[:line_start] + comment + text[line_start:], encoding="utf-8")
+    print(f"{path}: added SAFETY comment before assertion")
+    return True
+
+changed = 0
+for rel, marker, reason in TARGETS:
+    if ensure_safety(Path(rel), marker, reason):
+        changed += 1
+print(f"SafetyCommentsAdded={changed}")
+PY
+
+# Autofix readable-spacing then format, then re-lint (anti-slop install skill).
+# Failures in app source are reported; caller / agent should fix or configure
+# sensibly rather than blanket-disable rules.
+if [[ "$HAS_VITE_PLUS" -eq 1 ]]; then
+  log "anti-slop: vp lint --fix (readable-spacing) → vp fmt → vp lint"
+  npx vp lint --fix || warn "vp lint --fix reported issues (will re-check)"
+  npx vp fmt || warn "vp fmt reported issues"
+  if ! npx vp lint; then
+    warn "vp lint still failing after anti-slop — fix owned source or relax specific rules (do not blanket-disable)"
+    echo "AntiSlopLint=fail"
+  else
+    ok "vp lint clean with anti-slop"
+    echo "AntiSlopLint=pass"
+  fi
+else
+  log "anti-slop: oxlint --fix → oxfmt → oxlint"
+  npx oxlint --fix || warn "oxlint --fix reported issues (will re-check)"
+  npx oxfmt || warn "oxfmt reported issues"
+  if ! npx oxlint; then
+    warn "oxlint still failing after anti-slop — fix owned source or relax specific rules"
+    echo "AntiSlopLint=fail"
+  else
+    ok "oxlint clean with anti-slop"
+    echo "AntiSlopLint=pass"
+  fi
+fi
+
+ok "anti-slop vendored and configured"
+echo "AntiSlopDest=${DEST}"
+echo "OxlintPlugins=${OX_VER}"
+echo "EffectRules=${HAS_EFFECT}"
+echo "InertiaKit=${HAS_INERTIA}"
