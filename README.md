@@ -47,7 +47,8 @@ Before changing anything, the skill presents a numbered plan of all steps (scaff
 | `anti-slop` | Fetch latest dmmulroy/anti-slop into the app and wire into vp/oxlint |
 | `vitest` | Add Vitest smoke tests and `test:js` |
 | `ci` | Write `.github/workflows/ci.yml` |
-| `commits` | Three-commit layout: scaffold → essentials → tooling |
+| `docker` | ServerSideUp PHP Docker image + compose (queue/scheduler) |
+| `commits` | Commit layout: scaffold → essentials → tooling → docker |
 
 Helper: `skills/laravel-new/scripts/print-plan --app my-app --kit react`.
 
@@ -56,6 +57,7 @@ Helper: `skills/laravel-new/scripts/print-plan --app my-app --kit react`.
 1. **Scaffold** — `laravel new` (or `composer create-project`). Default kit: Inertia React. Commit 1.
 2. **Essentials** — self-contained PHP snippets / `apply-essentials` (strict models, immutable dates, safe console, HTTPS, Vite prefetch, test Http/Sleep nets, `make:action`, Pint). One atomic commit.
 3. **Tooling** — Boost, Wayfinder on Inertia/Vite if missing, **vite-plus `vp`** JS tooling (or oxfmt/oxlint/Vitest fallback), **anti-slop**, generated app **`.github/workflows/ci.yml`**, build, PHP tests. Separate commit.
+4. **Docker** (optional step) — [ServerSideUp PHP](https://serversideup.net/open-source/docker-php/) multi-stage image (`fpm-nginx` default; offer `frankenphp`), compose for local + prod (queue + scheduler), dedicated commit preferred.
 
 ### JS standard
 
@@ -77,7 +79,11 @@ Scripts detect the JS package manager from the lockfile (`package-lock.json` →
 
 ### Generated app CI
 
-`setup-ci-workflow` writes `.github/workflows/ci.yml` with parallel **php** and **js** jobs (check/dry-run only). It enables Pint `--test`, PHPStan, Rector `--dry-run`, and PHPUnit/Pest via `php artisan test` when those tools exist, plus whichever of `format:check` / `lint` / `types` / `test:js` / `build` are present as package scripts. Actions use Node-24-compatible majors (`actions/checkout@v5`, `actions/setup-node@v5`, `actions/cache@v5`).
+`setup-ci-workflow` writes `.github/workflows/ci.yml` with parallel **php** and **js** jobs (check/dry-run only). It enables Pint `--test`, PHPStan, Rector `--dry-run`, and PHPUnit/Pest via `php artisan test` when those tools exist, plus whichever of `format:check` / `lint` / `types` / `test:js` / `build` are present as package scripts. When a `Dockerfile` exists, it also adds a **docker** job that builds the production target only (no push). Actions use Node-24-compatible majors (`actions/checkout@v5`, `actions/setup-node@v5`, `actions/cache@v5`).
+
+### Docker (ServerSideUp)
+
+`setup-docker` writes `Dockerfile` (Composer `--no-dev` + Vite build — PHP+Node stage when Wayfinder needs `artisan` during `vp build` — + `serversideup/php:<php>-<variant>`), `.dockerignore`, `docker-compose.yml` (dev bind-mount), `docker-compose.prod.yml` (app + queue + scheduler, `AUTORUN_ENABLED`, `HEALTHCHECK_PATH=/up`), and `DOCKER.md`. Default variant **`fpm-nginx`**; plan can choose **`frankenphp`**. No secrets baked into the image.
 
 ### Layout
 
@@ -85,12 +91,13 @@ Scripts detect the JS package manager from the lockfile (`package-lock.json` →
 skills/laravel-new/
   SKILL.md
   scripts/scaffold-app | apply-essentials | setup-tooling | setup-js-tooling
-         | setup-anti-slop | setup-ci-workflow | print-plan
+         | setup-anti-slop | setup-ci-workflow | setup-docker | print-plan
   scripts/lib/package-manager.sh   # lockfile PM detect + --pm switch
   scripts/lib/steps.sh             # step ids + --skip parsing
   reference/ESSENTIALS.md          # paste-ready PHP snippets
   reference/stubs/                 # pint, rector, make:action
   reference/js/                    # ox* configs (fallback) + Vitest smoke
+  reference/docker/                # .dockerignore template
   reference/github/ci.yml.example  # shape of generated app CI
 ```
 

@@ -5,6 +5,7 @@
 #   print-plan [--kit <react|vue|svelte|livewire|none|using:...>]
 #              [--database <driver>] [--pest|--phpunit]
 #              [--agents <list>] [--pm <npm|pnpm|yarn|bun>]
+#              [--docker-variant fpm-nginx|frankenphp|fpm-apache|cli]
 #              [--app <name>] [--skip <step>]...
 #
 # Prints a numbered list tailored to kit + package manager. Skipped steps are
@@ -21,6 +22,7 @@ TEST_FRAMEWORK="phpunit"
 AGENTS="cursor,claude_code,codex"
 PM_LABEL="npm (default; follow kit lockfile after scaffold)"
 APP_NAME="my-app"
+DOCKER_VARIANT="fpm-nginx"
 SHOW_SKIPPED=0
 
 parse_skip_args "$@"
@@ -37,9 +39,10 @@ while [[ $# -gt 0 ]]; do
       PM_LABEL="$2 (explicit --pm)"
       shift 2
       ;;
+    --docker-variant) DOCKER_VARIANT="$2"; shift 2 ;;
     --app) APP_NAME="$2"; shift 2 ;;
     --show-skipped) SHOW_SKIPPED=1; shift ;;
-    -h|--help) sed -n '2,14p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
     *) echo "Unknown arg: $1" >&2; exit 1 ;;
   esac
 done
@@ -70,6 +73,7 @@ echo "laravel-new plan for \`${APP_NAME}\`"
 echo "Kit: $(kit_label) · DB: ${DATABASE} · PHP tests: ${TEST_FRAMEWORK}"
 echo "Package manager: ${PM_LABEL}"
 echo "Boost agents: ${AGENTS}"
+echo "Docker variant: ${DOCKER_VARIANT} (default fpm-nginx; offer frankenphp in plan-and-confirm)"
 echo
 echo "Proposed changes (reply with edits, removals by step id, or 'go ahead'):"
 echo
@@ -107,8 +111,9 @@ fi
 
 emit anti-slop "Fetch latest dmmulroy/anti-slop (npx skills add + install.mjs) into tools/oxlint/anti-slop, pin @oxlint/plugins, wire jsPlugins/rules/ignores; record commit in app UPSTREAM.md"
 emit vitest "Add Vitest smoke test + resources/js/vitest.setup.ts and test:js (vp test or vitest run)"
-emit ci "Write .github/workflows/ci.yml with parallel php + js check/dry-run jobs (lint covers anti-slop via npm run lint)"
-emit commits "Commit layout: (1) scaffold (2) essentials (3) tooling — never squash essentials into scaffold"
+emit ci "Write .github/workflows/ci.yml with parallel php + js check/dry-run jobs (lint covers anti-slop via npm run lint); optional docker build job when Docker files exist"
+emit docker "ServerSideUp PHP Docker: multi-stage Dockerfile (${DOCKER_VARIANT}), .dockerignore, docker-compose.yml (dev + ${DATABASE}), docker-compose.prod.yml (app + queue + scheduler), DOCKER.md — no secrets in image"
+emit commits "Commit layout: (1) scaffold (2) essentials (3) tooling (4) docker when enabled — never squash essentials into scaffold"
 
 echo
 echo "Step ids (for --skip): ${LARAVEL_NEW_STEPS[*]}"

@@ -288,6 +288,32 @@ else:
     # still record why js job omitted via stderr
     print("Skipping js job (no package.json scripts for format/lint/types/test/build)", file=sys.stderr)
 
+# ---------- Optional Docker build (no push) when Dockerfile exists ----------
+has_dockerfile = (root / "Dockerfile").is_file()
+if has_dockerfile:
+    w("  docker:")
+    w("    name: docker")
+    w("    runs-on: ubuntu-latest")
+    w("    timeout-minutes: 30")
+    w()
+    w("    steps:")
+    w("      - uses: actions/checkout@v5")
+    w()
+    w("      - name: Set up Docker Buildx")
+    w("        uses: docker/setup-buildx-action@v3")
+    w()
+    w("      - name: Build image (no push)")
+    w("        uses: docker/build-push-action@v6")
+    w("        with:")
+    w("          context: .")
+    w("          push: false")
+    w("          load: false")
+    w("          target: production")
+    w("          tags: laravel-app:ci")
+    w("          cache-from: type=gha")
+    w("          cache-to: type=gha,mode=max")
+    w()
+
 out = root / ".github" / "workflows" / "ci.yml"
 out.parent.mkdir(parents=True, exist_ok=True)
 text = "\n".join(lines).rstrip() + "\n"
@@ -307,6 +333,7 @@ print(
         "types": has_types,
         "test:js": has_test_js,
         "build": has_build,
+        "docker": has_dockerfile,
     },
 )
 PY

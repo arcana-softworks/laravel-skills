@@ -1,0 +1,587 @@
+#!/usr/bin/env bash
+# setup-docker — production-ready ServerSideUp PHP Docker layout for the app.
+#
+# Follows https://serversideup.net/open-source/docker-php/ Laravel guidance:
+#   serversideup/php variants, AUTORUN_*, HEALTHCHECK_PATH=/up, www-data,
+#   separate queue + scheduler services (same image), no secrets in the image.
+#
+# Usage:
+#   setup-docker [--dir <app>] [--variant fpm-nginx|frankenphp|fpm-apache|cli]
+#                [--php <major.minor>] [--node <major>]
+#
+# Defaults: variant=fpm-nginx, PHP from composer.json, Node 22, DB from .env.example.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/package-manager.sh
+source "${SCRIPT_DIR}/lib/package-manager.sh"
+REF_DOCKER="${SCRIPT_DIR}/../reference/docker"
+
+APP_DIR="$(pwd)"
+VARIANT="fpm-nginx"
+FORCE_PHP=""
+FORCE_NODE=""
+FORCE_PM=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --dir) APP_DIR="$2"; shift 2 ;;
+    --variant) VARIANT="$2"; shift 2 ;;
+    --php) FORCE_PHP="$2"; shift 2 ;;
+    --node) FORCE_NODE="$2"; shift 2 ;;
+    --pm) FORCE_PM="$2"; shift 2 ;;
+    -h|--help) sed -n '2,14p' "$0"; exit 0 ;;
+    *) echo "Unknown arg: $1" >&2; exit 1 ;;
+  esac
+done
+
+case "$VARIANT" in
+  fpm-nginx|frankenphp|fpm-apache|cli) ;;
+  *) echo "Unknown variant: ${VARIANT} (use fpm-nginx|frankenphp|fpm-apache|cli)" >&2; exit 1 ;;
+esac
+
+APP_DIR="$(cd "$APP_DIR" && pwd)"
+cd "$APP_DIR"
+export FORCE_PM
+
+RED=$'\033[0;31m'; GRN=$'\033[0;32m'; YLW=$'\033[0;33m'; BLU=$'\033[0;34m'; NC=$'\033[0m'
+log()  { printf '%s%s%s\n' "$BLU" "$*" "$NC" >&2; }
+ok()   { printf '%s%s%s\n' "$GRN" "$*" "$NC" >&2; }
+warn() { printf '%s%s%s\n' "$YLW" "$*" "$NC" >&2; }
+
+[[ -f artisan ]] || { printf '%s%s%s\n' "$RED" "Not a Laravel app: ${APP_DIR}" "$NC" >&2; exit 1; }
+
+resolve_package_manager
+log "Writing ServerSideUp Docker layout (variant=${VARIANT}, pm=${PM})"
+
+python3 - "$VARIANT" "$PM" "$FORCE_PHP" "$FORCE_NODE" "$REF_DOCKER" <<'PY'
+from __future__ import annotations
+
+import json
+import re
+import sys
+from pathlib import Path
+
+variant, pm, force_php, force_node, ref_docker = sys.argv[1:6]
+root = Path(".")
+ref = Path(ref_docker)
+
+def php_version() -> str:
+    if force_php:
+        return force_php
+    composer = json.loads((root / "composer.json").read_text(encoding="utf-8")) if (root / "composer.json").is_file() else {}
+    raw = str((composer.get("require") or {}).get("php", "8.3"))
+    m = re.search(r"(\d+\.\d+)", raw)
+    return m.group(1) if m else "8.3"
+
+def node_version() -> str:
+    if force_node:
+        return force_node
+    package = json.loads((root / "package.json").read_text(encoding="utf-8")) if (root / "package.json").is_file() else {}
+    engines = package.get("engines") or {}
+    raw = str(engines.get("node", "22"))
+    m = re.search(r"(\d+)", raw)
+    return m.group(1) if m else "22"
+
+def detect_db() -> str:
+    for name in (".env", ".env.example"):
+        path = root / name
+        if not path.is_file():
+            continue
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if line.startswith("DB_CONNECTION="):
+                return line.split("=", 1)[1].strip().strip('"').strip("'") or "sqlite"
+    return "sqlite"
+
+php_ver = php_version()
+node_ver = node_version()
+db = detect_db()
+has_js = (root / "package.json").is_file()
+image_tag = f"{php_ver}-{variant}"  # pinned major.minor + variant (not :latest)
+cli_tag = f"{php_ver}-cli"
+runtime_image = f"serversideup/php:{image_tag}"
+cli_image = f"serversideup/php:{cli_tag}"
+
+# --- package install / build commands for frontend stage ---
+if pm == "npm":
+    lock_copy = "COPY package.json package-lock.json* ./\nRUN npm ci"
+    js_build = "RUN npm run build"
+elif pm == "pnpm":
+    lock_copy = "COPY package.json pnpm-lock.yaml* ./\nRUN corepack enable && pnpm install --frozen-lockfile"
+    js_build = "RUN pnpm run build"
+elif pm == "yarn":
+    lock_copy = "COPY package.json yarn.lock* ./\nRUN corepack enable && yarn install --frozen-lockfile"
+    js_build = "RUN yarn build"
+else:  # bun
+    lock_copy = "COPY package.json bun.lockb* bun.lock* ./\nRUN npm install -g bun && bun install --frozen-lockfile"
+    js_build = "RUN bun run build"
+
+package = json.loads((root / "package.json").read_text(encoding="utf-8")) if has_js else {}
+js_deps = {**(package.get("dependencies") or {}), **(package.get("devDependencies") or {})}
+composer = json.loads((root / "composer.json").read_text(encoding="utf-8")) if (root / "composer.json").is_file() else {}
+composer_req = {**(composer.get("require") or {}), **(composer.get("require-dev") or {})}
+needs_php_for_vite = (
+    "@laravel/vite-plugin-wayfinder" in js_deps
+    or "laravel/wayfinder" in composer_req
+)
+
+# JS install lines when sources are already copied (Wayfinder PHP+Node stage).
+if pm == "npm":
+    js_install = "RUN npm ci"
+elif pm == "pnpm":
+    js_install = "RUN corepack enable && pnpm install --frozen-lockfile"
+elif pm == "yarn":
+    js_install = "RUN corepack enable && yarn install --frozen-lockfile"
+else:
+    js_install = "RUN npm install -g bun && bun install --frozen-lockfile"
+
+frontend_stage = ""
+frontend_copy = ""
+if has_js:
+    if needs_php_for_vite:
+        # Wayfinder (and similar) run `php artisan …` during `vite build`.
+        # Build on serversideup/php-cli with Node + full Composer deps so artisan
+        # can boot (host package discovery may reference require-dev like pail).
+        # This stage is discarded; production still uses --no-dev from composer-deps.
+        frontend_stage = f"""
+############################################
+# Frontend (Vite) assets — PHP available for Wayfinder
+############################################
+FROM serversideup/php:${{PHP_VERSION}}-cli AS frontend
+
+USER root
+RUN curl -fsSL https://deb.nodesource.com/setup_{node_ver}.x | bash - \\
+    && apt-get install -y --no-install-recommends nodejs \\
+    && apt-get clean \\
+    && rm -rf /var/lib/apt/lists/* \\
+    && install-php-extensions intl bcmath
+
+WORKDIR /var/www/html
+
+COPY . /var/www/html
+
+# Full Composer install (incl. require-dev) so Laravel boots for Wayfinder.
+# Production vendor still comes from the --no-dev composer-deps stage.
+RUN composer install \\
+    --no-interaction \\
+    --prefer-dist \\
+    --optimize-autoloader \\
+    && mkdir -p \\
+        storage/app/public \\
+        storage/framework/cache/data \\
+        storage/framework/sessions \\
+        storage/framework/views \\
+        storage/logs \\
+        bootstrap/cache \\
+        database \\
+    && touch database/database.sqlite \\
+    && cp .env.example .env \\
+    && php artisan key:generate --force --no-interaction \\
+    && (php artisan wayfinder:generate --with-form --skip-database --no-interaction \\
+        || php artisan wayfinder:generate --with-form --no-interaction \\
+        || php artisan wayfinder:generate --no-interaction \\
+        || true)
+
+{js_install}
+{js_build}
+"""
+        frontend_copy = """
+# Built Vite assets from the frontend stage
+COPY --chown=www-data:www-data --from=frontend /var/www/html/public/build ./public/build
+"""
+    else:
+        frontend_stage = f"""
+############################################
+# Frontend (Vite) assets
+############################################
+FROM node:{node_ver}-bookworm-slim AS frontend
+
+WORKDIR /app
+
+{lock_copy}
+
+# App sources needed for Vite (and vendor for any PHP-aware CSS plugins)
+COPY . .
+COPY --from=composer-deps /var/www/html/vendor ./vendor
+
+{js_build}
+"""
+        frontend_copy = """
+# Built Vite assets from the frontend stage
+COPY --chown=www-data:www-data --from=frontend /app/public/build ./public/build
+"""
+
+dockerfile = f"""# syntax=docker/dockerfile:1
+# Generated by laravel-new setup-docker (ServerSideUp PHP).
+# Docs: https://serversideup.net/open-source/docker-php/
+# Variant: {variant} · PHP {php_ver} · Node {node_ver if has_js else 'n/a'} · PM {pm if has_js else 'n/a'}
+# Do not bake secrets into this image — pass them at runtime via env / secrets.
+
+ARG PHP_VERSION={php_ver}
+ARG VARIANT={variant}
+ARG NODE_VERSION={node_ver}
+
+############################################
+# Composer production dependencies
+############################################
+FROM serversideup/php:${{PHP_VERSION}}-cli AS composer-deps
+
+WORKDIR /var/www/html
+
+# Install Laravel-friendly extensions when missing from the base image.
+USER root
+RUN install-php-extensions intl bcmath
+USER www-data
+
+COPY --chown=www-data:www-data composer.json composer.lock ./
+RUN composer install \\
+    --no-dev \\
+    --no-interaction \\
+    --no-scripts \\
+    --prefer-dist \\
+    --optimize-autoloader
+{frontend_stage}
+############################################
+# Production runtime (serversideup/php)
+############################################
+FROM serversideup/php:${{PHP_VERSION}}-${{VARIANT}} AS production
+
+USER root
+RUN install-php-extensions intl bcmath
+USER www-data
+
+WORKDIR /var/www/html
+
+# Application source (www-data ownership — see ServerSideUp packaging guide)
+COPY --chown=www-data:www-data . /var/www/html
+
+# Production Composer vendor (no-dev)
+COPY --chown=www-data:www-data --from=composer-deps /var/www/html/vendor ./vendor
+{frontend_copy}
+# Ensure storage / cache dirs exist for the non-root www-data user
+RUN mkdir -p \\
+    storage/app/public \\
+    storage/framework/cache/data \\
+    storage/framework/sessions \\
+    storage/framework/views \\
+    storage/logs \\
+    bootstrap/cache
+
+# Runtime defaults — override via compose/K8s env. Never put APP_KEY here.
+ENV PHP_OPCACHE_ENABLE=1
+ENV HEALTHCHECK_PATH=/up
+ENV SSL_MODE=off
+
+# HTTP (and HTTPS when SSL_MODE is enabled). Unprivileged images listen on 8080/8443.
+EXPOSE 8080 8443
+"""
+
+(root / "Dockerfile").write_text(dockerfile, encoding="utf-8")
+print("Wrote Dockerfile")
+
+# .dockerignore
+dockerignore_src = ref / ".dockerignore"
+if dockerignore_src.is_file():
+    (root / ".dockerignore").write_text(dockerignore_src.read_text(encoding="utf-8"), encoding="utf-8")
+else:
+    (root / ".dockerignore").write_text(".git\n.env\nnode_modules\nvendor\n", encoding="utf-8")
+print("Wrote .dockerignore")
+
+# --- docker-compose.yml (local / dev) ---
+db_services = ""
+db_depends = ""
+db_env = ""
+volumes_block = ""
+
+if db == "sqlite":
+    db_env = """      DB_CONNECTION: sqlite
+      DB_DATABASE: /var/www/html/database/database.sqlite
+"""
+elif db in ("mysql", "mariadb"):
+    db_services = """
+  database:
+    image: mariadb:11.4
+    environment:
+      MYSQL_DATABASE: laravel
+      MYSQL_USER: laravel
+      MYSQL_PASSWORD: secret
+      MYSQL_ROOT_PASSWORD: root
+    ports:
+      - "3306:3306"
+    volumes:
+      - db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+"""
+    db_depends = """    depends_on:
+      database:
+        condition: service_healthy
+"""
+    db_env = """      DB_CONNECTION: mysql
+      DB_HOST: database
+      DB_PORT: 3306
+      DB_DATABASE: laravel
+      DB_USERNAME: laravel
+      DB_PASSWORD: secret
+"""
+    volumes_block = """
+volumes:
+  db_data:
+"""
+elif db == "pgsql":
+    db_services = """
+  database:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: laravel
+      POSTGRES_USER: laravel
+      POSTGRES_PASSWORD: secret
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U laravel -d laravel"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+"""
+    db_depends = """    depends_on:
+      database:
+        condition: service_healthy
+"""
+    db_env = """      DB_CONNECTION: pgsql
+      DB_HOST: database
+      DB_PORT: 5432
+      DB_DATABASE: laravel
+      DB_USERNAME: laravel
+      DB_PASSWORD: secret
+"""
+    volumes_block = """
+volumes:
+  db_data:
+"""
+else:
+    db_env = f"      # DB_CONNECTION={db} — configure host/credentials via .env\n"
+
+compose_dev = f"""# Generated by laravel-new setup-docker — local/dev.
+# Uses a volume mount for fast iteration (ServerSideUp development pattern).
+# Production: build the image and use docker-compose.prod.yml instead.
+#
+#   docker compose up
+#   # app on http://localhost (maps host 80 → container 8080)
+
+services:
+  app:
+    image: {runtime_image}
+    ports:
+      - "80:8080"
+      - "443:8443"
+    volumes:
+      - ./:/var/www/html
+    environment:
+      SSL_MODE: "off"
+      PHP_OPCACHE_ENABLE: "0"
+      # AUTORUN is for production images; leave off while iterating with a bind mount.
+      AUTORUN_ENABLED: "false"
+      HEALTHCHECK_PATH: "/up"
+{db_env}    env_file:
+      - path: .env
+        required: false
+{db_depends}{db_services}{volumes_block}"""
+
+(root / "docker-compose.yml").write_text(compose_dev, encoding="utf-8")
+print("Wrote docker-compose.yml")
+
+# --- docker-compose.prod.yml ---
+prod_db_services = db_services
+prod_db_depends = db_depends
+prod_volumes = volumes_block
+# In prod, prefer env-driven DB (no baked passwords). Keep optional DB service as an example
+# with clearly placeholder credentials when not sqlite.
+if db != "sqlite" and db_services:
+    # rewrite passwords to env substitution
+    prod_db_services = db_services.replace("secret", "${DB_PASSWORD:-secret}").replace(
+        "MYSQL_ROOT_PASSWORD: root", "MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-root}"
+    )
+    prod_db_env = db_env.replace("secret", "${DB_PASSWORD:-secret}")
+else:
+    prod_db_env = """      # Provide DB_* via env / secrets store — never bake APP_KEY or passwords into the image.
+"""
+
+compose_prod = f"""# Generated by laravel-new setup-docker — production example.
+# Build once, run web + queue + scheduler from the SAME image (ServerSideUp guides).
+#
+#   docker compose -f docker-compose.prod.yml build
+#   docker compose -f docker-compose.prod.yml up -d
+#
+# Secrets (APP_KEY, DB_PASSWORD, …) must come from the environment or a secrets
+# manager — never from the Dockerfile.
+
+services:
+  app:
+    build:
+      context: .
+      target: production
+    image: ${{APP_IMAGE:-laravel-app:local}}
+    ports:
+      - "80:8080"
+      - "443:8443"
+    environment:
+      APP_ENV: production
+      APP_DEBUG: "false"
+      SSL_MODE: ${{SSL_MODE:-off}}
+      PHP_OPCACHE_ENABLE: "1"
+      HEALTHCHECK_PATH: "/up"
+      AUTORUN_ENABLED: "true"
+      AUTORUN_LARAVEL_STORAGE_LINK: "true"
+      AUTORUN_LARAVEL_MIGRATION: "true"
+      AUTORUN_LARAVEL_CONFIG_CACHE: "true"
+      AUTORUN_LARAVEL_ROUTE_CACHE: "true"
+      AUTORUN_LARAVEL_VIEW_CACHE: "true"
+      AUTORUN_LARAVEL_EVENT_CACHE: "true"
+      AUTORUN_LARAVEL_OPTIMIZE: "true"
+{prod_db_env}    env_file:
+      - path: .env
+        required: false
+    stop_signal: SIGTERM
+    healthcheck:
+      # Laravel ships /up — matches HEALTHCHECK_PATH (ServerSideUp Laravel healthcheck guide)
+      test: ["CMD", "curl", "--insecure", "--silent", "--location", "--show-error", "--fail", "http://localhost:8080/up"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+{prod_db_depends}
+  queue:
+    image: ${{APP_IMAGE:-laravel-app:local}}
+    command: ["php", "/var/www/html/artisan", "queue:work", "--sleep=3", "--tries=3", "--max-time=3600"]
+    environment:
+      APP_ENV: production
+      APP_DEBUG: "false"
+      PHP_OPCACHE_ENABLE: "1"
+      # Queue workers should not re-run web autorun migrations on every start.
+      AUTORUN_ENABLED: "false"
+{prod_db_env}    env_file:
+      - path: .env
+        required: false
+    stop_signal: SIGTERM
+    healthcheck:
+      test: ["CMD", "healthcheck-queue"]
+      start_period: 10s
+    depends_on:
+      - app
+
+  scheduler:
+    image: ${{APP_IMAGE:-laravel-app:local}}
+    command: ["php", "/var/www/html/artisan", "schedule:work"]
+    environment:
+      APP_ENV: production
+      APP_DEBUG: "false"
+      PHP_OPCACHE_ENABLE: "1"
+      AUTORUN_ENABLED: "false"
+{prod_db_env}    env_file:
+      - path: .env
+        required: false
+    stop_signal: SIGTERM
+    healthcheck:
+      test: ["CMD", "healthcheck-schedule"]
+      start_period: 10s
+    depends_on:
+      - app
+{prod_db_services}{prod_volumes}"""
+
+(root / "docker-compose.prod.yml").write_text(compose_prod, encoding="utf-8")
+print("Wrote docker-compose.prod.yml")
+
+# --- DOCKER.md ---
+docker_md = f"""# Docker (ServerSideUp PHP)
+
+Generated by `laravel-new` `setup-docker`. Images: [`serversideup/php`](https://serversideup.net/open-source/docker-php/).
+
+| Setting | Value |
+|---------|--------|
+| Variant | `{variant}` (default `fpm-nginx`; plan step can choose `frankenphp` / `fpm-apache` / `cli`) |
+| PHP tag | `{image_tag}` (pinned major.minor — not `:latest`) |
+| Health check path | `/up` (`HEALTHCHECK_PATH`) |
+| User | `www-data` (non-root) |
+| Automations | `AUTORUN_ENABLED` in **production** compose (migrate, storage:link, caches) |
+
+## Files
+
+- `Dockerfile` — multi-stage: Composer `--no-dev` → Vite build ({pm}; PHP+Node when Wayfinder needs artisan) → `{runtime_image}` runtime
+- `.dockerignore` — excludes `.env`, `vendor`, `node_modules`, git metadata
+- `docker-compose.yml` — local/dev bind-mount (DB: **{db}**)
+- `docker-compose.prod.yml` — built image + **queue** + **scheduler** (same image, S6-friendly SIGTERM)
+
+## Local
+
+```bash
+# Ensure .env exists (APP_KEY, etc.) — never commit secrets
+cp -n .env.example .env
+php artisan key:generate   # or set APP_KEY in your secret store
+
+docker compose up
+# http://localhost  →  container :8080
+```
+
+SQLite apps use `database/database.sqlite` on the bind mount. MySQL/Postgres compose files include a database service with placeholder credentials — override via env.
+
+## Production build
+
+```bash
+docker compose -f docker-compose.prod.yml build
+docker compose -f docker-compose.prod.yml up -d
+```
+
+Queue and scheduler use the same image:
+
+- `php /var/www/html/artisan queue:work …` + `healthcheck-queue`
+- `php /var/www/html/artisan schedule:work` + `healthcheck-schedule`
+
+Pass `APP_KEY`, DB credentials, and mail/queue secrets at runtime (`env_file` / orchestrator secrets). **Do not** `ENV APP_KEY=…` in the Dockerfile.
+
+## Useful env (see ServerSideUp docs)
+
+| Variable | Purpose |
+|----------|---------|
+| `AUTORUN_ENABLED` | Laravel automations on container start (prod) |
+| `HEALTHCHECK_PATH` | Default `/healthcheck`; we set `/up` for Laravel |
+| `PHP_OPCACHE_ENABLE` | `1` in production images |
+| `SSL_MODE` | `off` / `mixed` / `full` |
+
+## Changing the variant
+
+Re-run from the skill (or edit tags):
+
+```bash
+setup-docker --variant frankenphp
+```
+"""
+(root / "DOCKER.md").write_text(docker_md, encoding="utf-8")
+print("Wrote DOCKER.md")
+
+# Append a short pointer to the app README if present
+readme = root / "README.md"
+pointer = "\n## Docker\n\nSee [DOCKER.md](DOCKER.md) for ServerSideUp PHP images, compose files, and production queue/scheduler notes.\n"
+if readme.is_file():
+    text = readme.read_text(encoding="utf-8")
+    if "DOCKER.md" not in text:
+        readme.write_text(text.rstrip() + "\n" + pointer, encoding="utf-8")
+        print("Updated README.md with Docker pointer")
+else:
+    readme.write_text(f"# Laravel app\n{pointer}", encoding="utf-8")
+    print("Wrote README.md")
+
+print(f"DockerVariant={variant}")
+print(f"DockerPhp={php_ver}")
+print(f"DockerNode={node_ver}")
+print(f"DockerImage={runtime_image}")
+print(f"DockerDb={db}")
+print(f"DockerPm={pm}")
+PY
+
+ok "Docker layout ready (ServerSideUp ${VARIANT})"

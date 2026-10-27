@@ -4,7 +4,7 @@
 #
 # Canonical step ids (see SKILL.md "Plan and confirm"):
 #   scaffold | essentials | boost | wayfinder | js-fmt-lint | anti-slop |
-#   vitest | ci | commits
+#   vitest | ci | docker | commits
 #
 # Usage after source:
 #   parse_skip_args "$@"   # consumes --skip <id> / --skip-<id>; leaves rest in STEPS_REMAINING_ARGS
@@ -21,6 +21,7 @@ LARAVEL_NEW_STEPS=(
   anti-slop
   vitest
   ci
+  docker
   commits
 )
 
@@ -34,7 +35,8 @@ laravel_new_step_description() {
     anti-slop) echo "Fetch latest dmmulroy/anti-slop into the app and wire into vp/oxlint config" ;;
     vitest) echo "Add Vitest smoke tests, setup file, and test:js script" ;;
     ci) echo "Write .github/workflows/ci.yml (check/dry-run php + js jobs)" ;;
-    commits) echo "Three-commit layout: scaffold → essentials → tooling" ;;
+    docker) echo "Add ServerSideUp PHP Docker image (Dockerfile, compose, queue/scheduler)" ;;
+    commits) echo "Commit layout: scaffold → essentials → tooling → docker (if enabled)" ;;
     *) echo "Unknown step: $1" ;;
   esac
 }
@@ -94,6 +96,7 @@ parse_skip_args() {
       --skip-anti-slop) mark_step_skipped anti-slop; shift ;;
       --skip-vitest) mark_step_skipped vitest; shift ;;
       --skip-ci) mark_step_skipped ci; shift ;;
+      --skip-docker) mark_step_skipped docker; shift ;;
       --skip-commits) mark_step_skipped commits; shift ;;
       *)
         STEPS_REMAINING_ARGS+=("$1")

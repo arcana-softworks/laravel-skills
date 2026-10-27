@@ -101,6 +101,19 @@ jobs:
           grep -q 'run: npm run lint' .github/workflows/ci.yml
           grep -q 'phpstan analyse' .github/workflows/ci.yml
           ! grep -E 'pint --parallel[[:space:]]*$|pint --parallel --dirty|oxfmt[[:space:]]*$|vp fmt[[:space:]]*$|check:fix|--fix' .github/workflows/ci.yml
+          # ServerSideUp Docker layout + CI build-only job
+          test -f Dockerfile
+          test -f .dockerignore
+          test -f docker-compose.yml
+          test -f docker-compose.prod.yml
+          test -f DOCKER.md
+          grep -q 'serversideup/php:' Dockerfile
+          grep -q 'HEALTHCHECK_PATH' docker-compose.prod.yml
+          grep -q 'healthcheck-queue' docker-compose.prod.yml
+          grep -q 'healthcheck-schedule' docker-compose.prod.yml
+          grep -q 'name: docker' .github/workflows/ci.yml
+          grep -q 'push: false' .github/workflows/ci.yml
+          "$SKILL/scripts/print-plan" --app smoke-react --kit react | grep -q '\[docker\]'
           # Default path is npm (lockfile); scripts must not require --legacy-peer-deps
           ! grep -R -- '--legacy-peer-deps' "$SKILL/scripts"
           php artisan tinker --execute '
