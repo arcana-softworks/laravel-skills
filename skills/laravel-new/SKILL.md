@@ -28,8 +28,23 @@ SKILL_ROOT="…/skills/laravel-new"   # path after install
 | Database | `sqlite` |
 | Tests (PHP) | `phpunit` |
 | Boost agents | `cursor,claude_code,codex` |
+| JS package manager | **Follow the kit lockfile** (see below); do not ask unless the user brings it up |
 
 Kits: `--react` / `--vue` / `--svelte` / `--livewire` / none / `--using=<package-or-url>`.
+
+### Package manager
+
+Detect from the app lockfile (do not invent a preference):
+
+| Lockfile | Manager |
+|----------|---------|
+| `package-lock.json` | npm |
+| `pnpm-lock.yaml` | pnpm |
+| `yarn.lock` | yarn |
+| `bun.lockb` / `bun.lock` | bun |
+| *(none)* | **npm** (default) |
+
+Use **pnpm** (or yarn/bun) only when the user explicitly asks. Then pass `--pm pnpm` to `setup-tooling` / `setup-js-tooling` (swaps conflicting lockfiles and rewrites `composer.json` scripts that call `npm`/`pnpm`/…). Otherwise keep the detected manager and do not swap lockfiles.
 
 ## Commit layout (mandatory)
 
@@ -74,6 +89,8 @@ Key paste targets (see reference for full blocks):
 
 ```bash
 "${SKILL_ROOT}/scripts/setup-tooling" --dir . --agents cursor,claude_code,codex
+# Only if the user explicitly requested pnpm (or yarn/bun):
+# "${SKILL_ROOT}/scripts/setup-tooling" --dir . --agents cursor,claude_code,codex --pm pnpm
 git add -A
 git commit -m "Install Boost, Wayfinder (if needed), vite-plus/vp JS tooling, and project tooling"
 ```
@@ -98,3 +115,4 @@ App path, kit, three commits, PHP defaults present, Boost/Wayfinder/JS tooling s
 - Prefer skill scripts + `reference/ESSENTIALS.md` snippets over inventing config.
 - Keep PHP tests (`php artisan test`) and JS tests (`npm run test:js`) separate.
 - Prefer `vp` whenever `vite-plus` is present; only install oxfmt/oxlint/Vitest directly as a fallback.
+- Follow the kit package manager from the lockfile (default npm); switch to pnpm/yarn/bun only on explicit user request (`--pm`).

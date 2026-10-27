@@ -81,6 +81,9 @@ jobs:
           test ! -e jest.config.js
           test ! -e resources/js/jest.setup.ts
           grep -q 'typeCheck: true' vite.config.ts
+          test -f package-lock.json
+          # Default path is npm (lockfile); scripts must not require --legacy-peer-deps
+          ! grep -R -- '--legacy-peer-deps' "$SKILL/scripts"
           php artisan tinker --execute '
           $id = App\Models\User::factory()->create()->id;
           $u = App\Models\User::query()->findOrFail($id);

@@ -38,12 +38,17 @@ npx skills add arcana-softworks/laravel-new-skill --all
 
 On vite-plus kits, configure `fmt` / `lint` / `test` in `vite.config` (enable `lint.options.typeAware` + `typeCheck`). Do **not** add direct `oxfmt` / `oxlint` / `oxlint-tsgolint` deps or `.oxfmtrc.json` / `.oxlintrc.json`. PHP stays on Pest/PHPUnit via `php artisan test`.
 
+### Package manager
+
+Scripts detect the JS package manager from the lockfile (`package-lock.json` → npm, `pnpm-lock.yaml` → pnpm, `yarn.lock` → yarn, `bun.lockb`/`bun.lock` → bun), defaulting to **npm** when no lockfile exists. Pass `--pm pnpm` (or `yarn`/`bun`) to `setup-tooling` / `setup-js-tooling` only when the user explicitly requests that manager — that swaps conflicting lockfiles and rewrites `composer.json` scripts that invoke npm/pnpm/yarn/bun.
+
 ## Layout
 
 ```
 skills/laravel-new/
   SKILL.md
   scripts/scaffold-app | apply-essentials | setup-tooling | setup-js-tooling
+  scripts/lib/package-manager.sh   # lockfile PM detect + --pm switch
   reference/ESSENTIALS.md          # paste-ready PHP snippets
   reference/stubs/                 # pint, rector, make:action
   reference/js/                    # ox* configs (fallback) + Vitest smoke

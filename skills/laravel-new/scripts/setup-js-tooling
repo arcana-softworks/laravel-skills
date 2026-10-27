@@ -3,16 +3,20 @@
 # kit ships it; otherwise fall back to direct oxfmt/oxlint + Vitest.
 #
 # Usage:
-#   setup-js-tooling [--dir <app>]
+#   setup-js-tooling [--dir <app>] [--pm npm|pnpm|yarn|bun]
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/package-manager.sh
+source "${SCRIPT_DIR}/lib/package-manager.sh"
 REF_JS="${SCRIPT_DIR}/../reference/js"
 
 APP_DIR="$(pwd)"
+FORCE_PM=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --dir) APP_DIR="$2"; shift 2 ;;
+    --pm) FORCE_PM="$2"; shift 2 ;;
     -h|--help) sed -n '2,8p' "$0"; exit 0 ;;
     *) echo "Unknown arg: $1" >&2; exit 1 ;;
   esac
@@ -27,6 +31,10 @@ ok()   { printf '%s%s%s\n' "$GRN" "$*" "$NC" >&2; }
 warn() { printf '%s%s%s\n' "$YLW" "$*" "$NC" >&2; }
 
 [[ -f package.json ]] || { warn "No package.json — skipping JS tooling"; exit 0; }
+
+export FORCE_PM
+resolve_package_manager
+log "Package manager: ${PM}"
 
 detect_frontend() {
   python3 <<'PY'
@@ -52,16 +60,6 @@ data = json.load(open("package.json"))
 deps = {**data.get("dependencies", {}), **data.get("devDependencies", {})}
 raise SystemExit(0 if name in deps else 1)
 PY
-}
-
-npm_uninstall() {
-  local -a pkgs=("$@")
-  [[ ${#pkgs[@]} -eq 0 || -z "${pkgs[0]:-}" ]] && return 0
-  npm uninstall "${pkgs[@]}" || warn "npm uninstall reported issues"
-}
-
-npm_install_dev() {
-  npm install -D "$@"
 }
 
 FRONTEND="$(detect_frontend)"
@@ -103,7 +101,7 @@ PY
 mapfile -t OLD_PKGS < /tmp/js-old-pkgs.txt || true
 if [[ ${#OLD_PKGS[@]} -gt 0 && -n "${OLD_PKGS[0]:-}" ]]; then
   log "Removing old JS lint/format/Jest packages: ${OLD_PKGS[*]}"
-  npm_uninstall "${OLD_PKGS[@]}"
+  pm_remove "${OLD_PKGS[@]}" || warn "pm remove reported issues"
 fi
 
 for f in \
@@ -259,7 +257,7 @@ PY
   mapfile -t OX_PKGS < /tmp/js-ox-pkgs.txt || true
   if [[ ${#OX_PKGS[@]} -gt 0 && -n "${OX_PKGS[0]:-}" ]]; then
     log "Removing direct ox* packages (provided by vite-plus): ${OX_PKGS[*]}"
-    npm_uninstall "${OX_PKGS[@]}"
+    pm_remove "${OX_PKGS[@]}" || warn "pm remove reported issues"
   fi
 
   for f in .oxfmtrc.json .oxfmtrc .oxlintrc.json .oxlintrc oxlint.config.ts oxlint.config.js; do
@@ -269,7 +267,7 @@ PY
   ensure_vite_plus_config
 
   log "Installing Vitest support packages: ${TEST_PKGS[*]}"
-  npm_install_dev "${TEST_PKGS[@]}"
+  pm_add_dev "${TEST_PKGS[@]}"
 
   case "$FRONTEND" in
     react) cp "${REF_JS}/smoke.test.tsx" resources/js/__tests__/smoke.test.tsx ;;
@@ -289,7 +287,7 @@ else
   log "No vite-plus — falling back to direct oxfmt/oxlint + Vitest"
 
   log "Installing oxfmt, oxlint, oxlint-tsgolint..."
-  npm_install_dev oxfmt oxlint oxlint-tsgolint
+  pm_add_dev oxfmt oxlint oxlint-tsgolint
 
   cp "${REF_JS}/.oxfmtrc.json" .oxfmtrc.json
   case "$FRONTEND" in
@@ -312,7 +310,7 @@ PY
   fi
 
   log "Installing Vitest support packages: ${TEST_PKGS[*]}"
-  npm_install_dev "${TEST_PKGS[@]}"
+  pm_add_dev "${TEST_PKGS[@]}"
 
   HAS_VITE_CONFIG=0
   for cfg in vite.config.ts vite.config.js vite.config.mts vite.config.mjs; do
@@ -425,4 +423,5 @@ fi
 ok "JS tooling ready ($([ "$HAS_VITE_PLUS" -eq 1 ] && echo 'vite-plus vp' || echo 'oxfmt/oxlint + Vitest'))"
 echo "Frontend=${FRONTEND}"
 echo "VitePlus=${HAS_VITE_PLUS}"
+echo "PM=${PM}"
 echo "TestCmd=${TEST_CMD}"
