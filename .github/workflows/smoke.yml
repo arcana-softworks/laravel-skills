@@ -82,11 +82,14 @@ jobs:
           test ! -e resources/js/jest.setup.ts
           grep -q 'typeCheck: true' vite.config.ts
           test -f package-lock.json
-          # anti-slop (vendored) wired into vp lint
+          # anti-slop fetched at run time into the app (not skill-vendored)
           test -f tools/oxlint/anti-slop/index.ts
+          test -f tools/oxlint/anti-slop/UPSTREAM.md
+          grep -qE 'Commit: [0-9a-f]{40}' tools/oxlint/anti-slop/UPSTREAM.md
           grep -q '@oxlint/plugins' package.json
           grep -q "tools/oxlint/anti-slop" vite.config.ts
           grep -q "anti-slop/require-readable-spacing" vite.config.ts
+          test ! -d "$SKILL/reference/anti-slop"
           # plan-and-confirm helper lists step ids
           "$SKILL/scripts/print-plan" --app smoke-react --kit react | grep -q '\[anti-slop\]'
           "$SKILL/scripts/print-plan" --app smoke-react --kit react --skip boost --skip vitest | grep -q 'Already skipped: boost vitest'

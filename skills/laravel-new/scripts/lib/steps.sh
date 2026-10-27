@@ -31,7 +31,7 @@ laravel_new_step_description() {
     boost) echo "Install Laravel Boost and configure agents" ;;
     wayfinder) echo "Install Wayfinder when Inertia + Vite (skip if already present / non-Inertia)" ;;
     js-fmt-lint) echo "Configure oxfmt/oxlint via vite-plus vp (or direct ox* fallback) + package scripts" ;;
-    anti-slop) echo "Vendor dmmulroy/anti-slop Oxlint rules and wire into vp/oxlint config" ;;
+    anti-slop) echo "Fetch latest dmmulroy/anti-slop into the app and wire into vp/oxlint config" ;;
     vitest) echo "Add Vitest smoke tests, setup file, and test:js script" ;;
     ci) echo "Write .github/workflows/ci.yml (check/dry-run php + js jobs)" ;;
     commits) echo "Three-commit layout: scaffold → essentials → tooling" ;;

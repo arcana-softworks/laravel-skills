@@ -5,9 +5,9 @@ description: >-
   (Inertia React default), apply sensible Laravel source defaults in one atomic
   commit, then set up Boost, Wayfinder when needed, JS tooling via vite-plus
   (`vp fmt` / `vp lint` / `vp check` / `vp test` / `vp build`) when present, with
-  oxfmt/oxlint/Vitest fallback otherwise, plus vendored anti-slop Oxlint rules
-  and a generated app CI workflow. Use when the user asks for a new Laravel app,
-  laravel new, or scaffold Laravel.
+  oxfmt/oxlint/Vitest fallback otherwise, plus anti-slop Oxlint rules fetched
+  fresh from upstream at run time, and a generated app CI workflow. Use when
+  the user asks for a new Laravel app, laravel new, or scaffold Laravel.
 ---
 
 # laravel-new
@@ -44,7 +44,7 @@ Or list the same steps yourself using the table below. Include kit, DB, PHP test
 | `boost` | Install Laravel Boost and configure agents |
 | `wayfinder` | Install Wayfinder when Inertia + Vite (skip if already present / non-Inertia) |
 | `js-fmt-lint` | Configure oxfmt/oxlint via vite-plus `vp` (or direct ox* fallback) + package scripts |
-| `anti-slop` | Vendor [dmmulroy/anti-slop](https://github.com/dmmulroy/anti-slop) Oxlint rules and wire into vp/oxlint config |
+| `anti-slop` | Fetch latest [dmmulroy/anti-slop](https://github.com/dmmulroy/anti-slop) into the app and wire into vp/oxlint config |
 | `vitest` | Add Vitest smoke tests, setup file, and `test:js` script |
 | `ci` | Write `.github/workflows/ci.yml` (check/dry-run php + js jobs) |
 | `commits` | Three-commit layout: scaffold → essentials → tooling |
@@ -149,18 +149,20 @@ JS standard — **prefer vite-plus** on React/Vue/Svelte kits (config in `vite.c
 
 #### anti-slop
 
-Vendored from [dmmulroy/anti-slop](https://github.com/dmmulroy/anti-slop) (no npm package — copy `src/` → `tools/oxlint/anti-slop`). Skill ships a pinned copy under `reference/anti-slop/` (see `UPSTREAM.md`). Install steps (normal package install + config only):
+Fetch **latest** [dmmulroy/anti-slop](https://github.com/dmmulroy/anti-slop) at run time into the **target app** (the skill does **not** ship a stale rules copy). Follow the upstream README install route:
 
-1. Copy plugin → `tools/oxlint/anti-slop/`
-2. Pin `@oxlint/plugins@<exact oxlint version>` as a devDependency (match installed oxlint, including vite-plus’s nested copy)
-3. Merge `ignorePatterns`, `jsPlugins`, and all generic `rules` into `vite.config` `lint` (and the same ignores into `fmt.ignorePatterns`), or into `.oxlintrc.json` on the oxlint fallback path
-4. Enable Effect plugin/rules only when `effect` is a **direct** dependency
-5. Run `vp lint --fix` (or `oxlint --fix`) → formatter → lint again; fix owned source or relax specific rules sensibly — do not blanket-disable
-6. On Inertia kits, add `// SAFETY:` comments for known starter-kit assertions and apply these **narrow** relaxations (report them in the summary):
+1. `npx skills add dmmulroy/anti-slop --skill install-anti-slop`
+2. `node <skill>/scripts/install.mjs` → copies plugin to `tools/oxlint/anti-slop/` in the app
+3. Pin `@oxlint/plugins@<exact oxlint version>` as a devDependency (match installed oxlint, including vite-plus’s nested copy)
+4. Merge `ignorePatterns`, `jsPlugins`, and all generic `rules` into `vite.config` `lint` (and the same ignores into `fmt.ignorePatterns`), or into `.oxlintrc.json` on the oxlint fallback path
+5. Enable Effect plugin/rules only when `effect` is a **direct** dependency
+6. Record the resolved upstream **commit SHA** only in the generated app (`tools/oxlint/anti-slop/UPSTREAM.md`)
+7. Run `vp lint --fix` (or `oxlint --fix`) → formatter → lint again; fix owned source or relax specific rules sensibly — do not blanket-disable
+8. On Inertia kits, add `// SAFETY:` comments for known starter-kit assertions and apply these **narrow app-side** relaxations (report them in the summary):
    - `anti-slop/no-unsafe-dictionary-type=off` — Inertia `sharedPageProps` / `User` open index signatures
    - `anti-slop/no-runtime-typeof=off` — Inertia `href` string|object unions in kit helpers
 
-**Oddity flagged:** anti-slop’s source imports `@oxlint/plugins` and its install skill installs that package. vite-plus docs prefer `vite-plus/lint/plugins` imports; we follow anti-slop’s instructions and pin `@oxlint/plugins` exactly to the resolved oxlint version. Do not run anti-slop’s unrelated scripts beyond the documented copy + config.
+**Oddity flagged:** anti-slop’s source imports `@oxlint/plugins` and its install skill installs that package. vite-plus docs prefer `vite-plus/lint/plugins` imports; we follow anti-slop’s instructions and pin `@oxlint/plugins` exactly to the resolved oxlint version. Do not run anti-slop’s unrelated scripts beyond the documented fetch + copy + config.
 
 #### Generated app CI
 
@@ -179,4 +181,4 @@ App path, kit, commits (or skipped), PHP defaults present, Boost/Wayfinder/JS to
 - Prefer `vp` whenever `vite-plus` is present; only install oxfmt/oxlint/Vitest directly as a fallback.
 - Follow the kit package manager from the lockfile (default npm); switch to pnpm/yarn/bun only on explicit user request (`--pm`).
 - Generated app CI must stay check/dry-run only (never write or auto-fix).
-- anti-slop: vendor + `@oxlint/plugins` pin + config merge only; report oddities; keep lint green by fixing or narrowly relaxing rules.
+- anti-slop: fetch latest upstream into the app (no skill-vendored rules) + `@oxlint/plugins` pin + config merge; record commit in the app; report oddities; keep lint green by fixing or narrowly relaxing rules.

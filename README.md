@@ -25,7 +25,7 @@ More skills will land under `skills/` over time. Each skill is self-contained (`
 
 ## laravel-new
 
-Scaffolds a new Laravel app (any official or community starter kit), applies **sensible Laravel source defaults**, then sets up Boost, Wayfinder (when needed), JS tooling via **vite-plus (`vp`)** when the kit ships it (oxfmt/oxlint/Vitest fallback otherwise), vendored **[anti-slop](https://github.com/dmmulroy/anti-slop)** Oxlint rules, and a generated app CI workflow.
+Scaffolds a new Laravel app (any official or community starter kit), applies **sensible Laravel source defaults**, then sets up Boost, Wayfinder (when needed), JS tooling via **vite-plus (`vp`)** when the kit ships it (oxfmt/oxlint/Vitest fallback otherwise), **[anti-slop](https://github.com/dmmulroy/anti-slop)** Oxlint rules fetched fresh from upstream at run time, and a generated app CI workflow.
 
 | Agent | Typical path | Flag |
 |-------|--------------|------|
@@ -44,7 +44,7 @@ Before changing anything, the skill presents a numbered plan of all steps (scaff
 | `boost` | Install Laravel Boost and configure agents |
 | `wayfinder` | Install Wayfinder when Inertia + Vite |
 | `js-fmt-lint` | Configure oxfmt/oxlint via `vp` (or ox* fallback) |
-| `anti-slop` | Vendor dmmulroy/anti-slop and wire into vp/oxlint |
+| `anti-slop` | Fetch latest dmmulroy/anti-slop into the app and wire into vp/oxlint |
 | `vitest` | Add Vitest smoke tests and `test:js` |
 | `ci` | Write `.github/workflows/ci.yml` |
 | `commits` | Three-commit layout: scaffold → essentials → tooling |
@@ -69,7 +69,7 @@ Helper: `skills/laravel-new/scripts/print-plan --app my-app --kit react`.
 
 On vite-plus kits, configure `fmt` / `lint` / `test` in `vite.config` (enable `lint.options.typeAware` + `typeCheck`). Do **not** add direct `oxfmt` / `oxlint` / `oxlint-tsgolint` deps or `.oxfmtrc.json` / `.oxlintrc.json`. PHP stays on Pest/PHPUnit via `php artisan test`.
 
-**anti-slop:** vendored to `tools/oxlint/anti-slop` (skill ships `reference/anti-slop/`), pins `@oxlint/plugins` to the resolved oxlint version, merges ignores / `jsPlugins` / rules into `vite.config` `lint` (and ignores into `fmt`). Effect rules only when `effect` is a direct dependency. CI `lint` job runs the same `npm run lint` / `vp lint` path.
+**anti-slop:** at run time fetches latest via `npx skills add dmmulroy/anti-slop --skill install-anti-slop` + `install.mjs` into the app’s `tools/oxlint/anti-slop/` (no stale copy in the skill), pins `@oxlint/plugins` to the resolved oxlint version, merges ignores / `jsPlugins` / rules into `vite.config` `lint` (and ignores into `fmt`), and records the upstream commit in the app’s `UPSTREAM.md`. Effect rules only when `effect` is a direct dependency. CI `lint` job runs the same `npm run lint` / `vp lint` path.
 
 ### Package manager
 
@@ -91,7 +91,6 @@ skills/laravel-new/
   reference/ESSENTIALS.md          # paste-ready PHP snippets
   reference/stubs/                 # pint, rector, make:action
   reference/js/                    # ox* configs (fallback) + Vitest smoke
-  reference/anti-slop/             # vendored dmmulroy/anti-slop plugin copy
   reference/github/ci.yml.example  # shape of generated app CI
 ```
 

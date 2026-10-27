@@ -105,7 +105,7 @@ else
   emit js-fmt-lint "No vite-plus expected — install oxfmt/oxlint/oxlint-tsgolint and configure .oxfmtrc / .oxlintrc fallback"
 fi
 
-emit anti-slop "Vendor dmmulroy/anti-slop → tools/oxlint/anti-slop, pin @oxlint/plugins to oxlint, register jsPlugins/rules/ignores in vite lint (or .oxlintrc)"
+emit anti-slop "Fetch latest dmmulroy/anti-slop (npx skills add + install.mjs) into tools/oxlint/anti-slop, pin @oxlint/plugins, wire jsPlugins/rules/ignores; record commit in app UPSTREAM.md"
 emit vitest "Add Vitest smoke test + resources/js/vitest.setup.ts and test:js (vp test or vitest run)"
 emit ci "Write .github/workflows/ci.yml with parallel php + js check/dry-run jobs (lint covers anti-slop via npm run lint)"
 emit commits "Commit layout: (1) scaffold (2) essentials (3) tooling — never squash essentials into scaffold"
