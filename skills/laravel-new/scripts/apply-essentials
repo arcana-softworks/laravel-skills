@@ -319,12 +319,14 @@ install_pint() {
   copy_stub "${STUBS_DIR}/pint.json" "$dest"
 }
 
-# When Pint's final_class rule makes User final, Unique is Stringable not ValidationRule.
+# When Pint's final_class rule makes User final, Rule::unique() is typed as Unique
+# (not ValidationRule) for Larastan — widen PHPDoc accordingly when the trait exists.
 fix_profile_validation_phpdoc() {
   local file="${APP_DIR}/app/Concerns/ProfileValidationRules.php"
   [[ -f "$file" ]] || return 0
-  if grep -q 'Stringable' "$file"; then
-    ok "ProfileValidationRules PHPDoc already includes Stringable"
+  if grep -q 'use Illuminate\\Validation\\Rules\\Unique;' "$file" \
+    && grep -q '@return array<int, Unique|string>' "$file"; then
+    ok "ProfileValidationRules PHPDoc already includes Unique"
     return 0
   fi
   log "Updating ProfileValidationRules PHPDoc for final User + Rule::unique()"
@@ -333,29 +335,52 @@ fix_profile_validation_phpdoc() {
   fi
   python3 - "$file" <<'PY'
 from pathlib import Path
+import re
 import sys
+
 path = Path(sys.argv[1])
 text = path.read_text(encoding="utf-8")
-if "Stringable" in text:
-    raise SystemExit(0)
-old_use = "use Illuminate\\Contracts\\Validation\\ValidationRule;\nuse Illuminate\\Validation\\Rule;"
-new_use = "use Illuminate\\Contracts\\Validation\\ValidationRule;\nuse Illuminate\\Support\\Stringable;\nuse Illuminate\\Validation\\Rule;"
-if old_use not in text:
-    # Still try to insert Stringable import after ValidationRule import
-    if "use Illuminate\\Contracts\\Validation\\ValidationRule;" in text and "Stringable" not in text:
-        text = text.replace(
-            "use Illuminate\\Contracts\\Validation\\ValidationRule;",
-            "use Illuminate\\Contracts\\Validation\\ValidationRule;\nuse Illuminate\\Support\\Stringable;",
-            1,
-        )
-    else:
-        raise SystemExit("Could not locate imports in ProfileValidationRules.php")
-else:
-    text = text.replace(old_use, new_use, 1)
+
+if "use Illuminate\\Validation\\Rules\\Unique;" not in text:
+    text = text.replace(
+        "use Illuminate\\Validation\\Rule;",
+        "use Illuminate\\Validation\\Rule;\nuse Illuminate\\Validation\\Rules\\Unique;",
+        1,
+    )
+
+# Drop a mistaken Stringable import if we previously added one.
+text = text.replace("use Illuminate\\Support\\Stringable;\n", "")
+
 text = text.replace(
-    "@return array<int, ValidationRule|array<mixed>|string>",
-    "@return array<int, ValidationRule|Stringable|array<mixed>|string>",
+    "@return array<string, array<int, ValidationRule|array<mixed>|string>>",
+    "@return array<string, array<int, ValidationRule|Unique|array<mixed>|string>>",
 )
+text = text.replace(
+    "@return array<string, array<int, ValidationRule|Stringable|array<mixed>|string>>",
+    "@return array<string, array<int, ValidationRule|Unique|array<mixed>|string>>",
+)
+
+# emailRules specifically returns Unique|string after Rule::unique()
+text = re.sub(
+    r"(function emailRules\([^\)]*\): array\s*\{)",
+    lambda m: m.group(0),
+    text,
+    count=1,
+)
+
+# Replace the emailRules docblock return type (the one immediately above emailRules).
+text = re.sub(
+    r"(/\*\*[\s\S]*?@return )array<int, ValidationRule(?:\|Stringable)?(?:\|array<mixed>)?\|string>(\s*\*/\s*protected function emailRules)",
+    r"\1array<int, Unique|string>\2",
+    text,
+    count=1,
+)
+# Also fix nameRules if we accidentally widened it with Stringable
+text = text.replace(
+    "@return array<int, ValidationRule|Stringable|array<mixed>|string>",
+    "@return array<int, ValidationRule|array<mixed>|string>",
+)
+
 path.write_text(text, encoding="utf-8")
 PY
   ok "Updated ProfileValidationRules PHPDoc"
