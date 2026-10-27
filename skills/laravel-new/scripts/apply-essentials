@@ -1,0 +1,356 @@
+#!/usr/bin/env bash
+# apply-essentials — idempotently apply Nuno Maduro Essentials recommendations
+# as plain Laravel source changes (never composer-require nunomaduro/essentials).
+#
+# Usage:
+#   apply-essentials [--dir <app>] [--skip-fetch] [--dry-run]
+#
+# Designed to work across official and community starter kits by registering a
+# dedicated service provider rather than assuming a particular AppServiceProvider shape.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SKILL_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+REF_DIR="${SKILL_DIR}/reference"
+STUBS_DIR="${REF_DIR}/stubs"
+
+APP_DIR="$(pwd)"
+SKIP_FETCH=0
+DRY_RUN=0
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --dir) APP_DIR="$2"; shift 2 ;;
+    --skip-fetch) SKIP_FETCH=1; shift ;;
+    --dry-run) DRY_RUN=1; shift ;;
+    -h|--help)
+      sed -n '2,12p' "$0"
+      exit 0
+      ;;
+    *) echo "Unknown arg: $1" >&2; exit 1 ;;
+  esac
+done
+
+APP_DIR="$(cd "$APP_DIR" && pwd)"
+
+RED=$'\033[0;31m'; GRN=$'\033[0;32m'; YLW=$'\033[0;33m'; BLU=$'\033[0;34m'; NC=$'\033[0m'
+log()  { printf '%s%s%s\n' "$BLU" "$*" "$NC" >&2; }
+ok()   { printf '%s%s%s\n' "$GRN" "$*" "$NC" >&2; }
+warn() { printf '%s%s%s\n' "$YLW" "$*" "$NC" >&2; }
+err()  { printf '%s%s%s\n' "$RED" "$*" "$NC" >&2; }
+
+[[ -f "${APP_DIR}/artisan" ]] || { err "Not a Laravel app: ${APP_DIR}"; exit 1; }
+
+# Refuse if the package is already required — this skill applies source translations instead.
+if [[ -f "${APP_DIR}/composer.json" ]]; then
+  if python3 - "$APP_DIR/composer.json" <<'PY'
+import json, sys
+data = json.load(open(sys.argv[1]))
+req = {**data.get("require", {}), **data.get("require-dev", {})}
+sys.exit(0 if "nunomaduro/essentials" in req else 1)
+PY
+  then
+    err "composer.json already requires nunomaduro/essentials."
+    err "Remove it first; this skill applies Essentials as source changes only."
+    exit 1
+  fi
+fi
+
+ESSENTIALS_README_URL="https://raw.githubusercontent.com/nunomaduro/essentials/main/README.md"
+ESSENTIALS_CONFIG_URL="https://raw.githubusercontent.com/nunomaduro/essentials/main/config/essentials.php"
+KNOWN_FEATURES=(
+  "ShouldBeStrict"
+  "AutomaticallyEagerLoadRelationships"
+  "ImmutableDates"
+  "ForceScheme"
+  "ProhibitDestructiveCommands"
+  "AggressivePrefetching"
+  "PreventStrayRequests"
+  "FakeSleep"
+  "SetDefaultPassword"
+  "make:action"
+  "Unguard"
+)
+
+fetch_upstream_check() {
+  [[ "$SKIP_FETCH" -eq 1 ]] && { warn "Skipping upstream Essentials fetch (--skip-fetch)"; return 0; }
+  need_curl="$(command -v curl || true)"
+  [[ -n "$need_curl" ]] || { warn "curl missing — cannot check upstream Essentials; continuing with known set"; return 0; }
+
+  log "Checking current nunomaduro/essentials recommendations..."
+  local tmp readme
+  tmp="$(mktemp -d)"
+  if ! curl -fsSL "$ESSENTIALS_README_URL" -o "${tmp}/README.md"; then
+    warn "Could not fetch Essentials README; continuing with known feature set"
+    rm -rf "$tmp"
+    return 0
+  fi
+  readme="$(cat "${tmp}/README.md")"
+  local missing=()
+  # Heuristic: feature headings / keywords that appear in the package README.
+  for feat in "Strict Models" "Auto Eager Loading" "Immutable Dates" "Force HTTPS" "Safe Console" "Asset Prefetching" "Prevent Stray Requests" "Fake Sleep" "make:action" "Unguarded"; do
+    if ! grep -qi "$feat" <<<"$readme"; then
+      missing+=("$feat")
+    fi
+  done
+  # Detect possibly NEW sections we do not implement yet (## headings under Features-ish content).
+  python3 - "$tmp/README.md" <<'PY' || true
+import re, sys
+text = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+known = {
+  "strict models", "auto eager loading", "optional unguarded models", "unguarded models",
+  "immutable dates", "force https", "safe console", "asset prefetching",
+  "prevent stray requests", "fake sleep", "artisan commands", "make:action",
+  "essentials:pint", "essentials:rector", "features", "installation", "configuration",
+  "table of contents", "license", "contributing",
+}
+heads = re.findall(r"^#{2,3}\s+(.+)$", text, flags=re.M)
+new = []
+for h in heads:
+    clean = re.sub(r"[^a-z0-9 :/-]+", "", h.lower()).strip()
+    # strip emoji leftovers / punctuation noise
+    clean = re.sub(r"^[^a-z0-9]+", "", clean)
+    if not clean or any(k in clean for k in known):
+        continue
+    if len(clean) < 4:
+        continue
+    new.append(h.strip())
+if new:
+    print("WARN: Essentials README has headings not in this skill's known set:")
+    for h in new[:12]:
+        print(f"  - {h}")
+    print("Review https://github.com/nunomaduro/essentials and extend apply-essentials if needed.")
+else:
+    print("Upstream Essentials feature set matches known translations (or no novel headings detected).")
+PY
+  rm -rf "$tmp"
+}
+
+write_file() {
+  local path="$1"
+  local content="$2"
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    log "[dry-run] would write ${path}"
+    return 0
+  fi
+  mkdir -p "$(dirname "$path")"
+  printf '%s' "$content" > "$path"
+}
+
+copy_stub() {
+  local src="$1"
+  local dest="$2"
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    log "[dry-run] would copy ${src} -> ${dest}"
+    return 0
+  fi
+  mkdir -p "$(dirname "$dest")"
+  cp "$src" "$dest"
+}
+
+PROVIDER_PATH="app/Providers/EssentialsServiceProvider.php"
+PROVIDER_FQCN="App\\Providers\\EssentialsServiceProvider"
+
+write_provider() {
+  local dest="${APP_DIR}/${PROVIDER_PATH}"
+  if [[ -f "$dest" ]] && grep -q 'Model::shouldBeStrict' "$dest"; then
+    ok "EssentialsServiceProvider already present"
+    return 0
+  fi
+  log "Writing ${PROVIDER_PATH}"
+  write_file "$dest" "$(cat <<'PHP'
+<?php
+
+declare(strict_types=1);
+
+namespace App\Providers;
+
+use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Date;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\URL;
+use Illuminate\Support\Facades\Vite;
+use Illuminate\Support\ServiceProvider;
+use Illuminate\Support\Sleep;
+use Illuminate\Validation\Rules\Password;
+
+/**
+ * Nuno Maduro Essentials recommendations applied as plain source
+ * (nunomaduro/essentials is intentionally not required).
+ *
+ * @see https://github.com/nunomaduro/essentials
+ */
+final class EssentialsServiceProvider extends ServiceProvider
+{
+    public function register(): void
+    {
+        //
+    }
+
+    public function boot(): void
+    {
+        // Strict models: prevent lazy loading, silently discarding attributes,
+        // and accessing missing attributes.
+        Model::shouldBeStrict();
+
+        // Automatically eager-load relationships declared on models.
+        Model::automaticallyEagerLoadRelationships();
+
+        // Immutable dates everywhere.
+        Date::use(CarbonImmutable::class);
+
+        // Block destructive Artisan DB commands in production.
+        DB::prohibitDestructiveCommands(app()->isProduction());
+
+        // Force HTTPS URLs in production.
+        if (app()->isProduction()) {
+            URL::forceHttps();
+        }
+
+        // Aggressive Vite asset prefetching (no-op when Vite is unused).
+        Vite::useAggressivePrefetching();
+
+        // Stronger default password rules outside unit tests (Essentials skips
+        // during tests so factories / feature tests stay flexible).
+        if (! app()->runningUnitTests()) {
+            Password::defaults(fn (): ?Password => app()->isProduction()
+                ? Password::min(12)
+                    ->letters()
+                    ->mixedCase()
+                    ->numbers()
+                    ->symbols()
+                    ->max(255)
+                    ->uncompromised()
+                : null);
+        }
+
+        // Test safety nets from Essentials.
+        if (app()->runningUnitTests()) {
+            Http::preventStrayRequests();
+            Sleep::fake();
+        }
+    }
+}
+PHP
+)"
+  ok "Wrote ${PROVIDER_PATH}"
+}
+
+register_provider() {
+  local providers_php="${APP_DIR}/bootstrap/providers.php"
+  local config_app="${APP_DIR}/config/app.php"
+
+  if [[ -f "$providers_php" ]]; then
+    if grep -q 'EssentialsServiceProvider' "$providers_php"; then
+      ok "EssentialsServiceProvider already registered in bootstrap/providers.php"
+      return 0
+    fi
+    log "Registering provider in bootstrap/providers.php"
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+      return 0
+    fi
+    python3 - "$providers_php" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+text = path.read_text()
+needle = "App\\Providers\\AppServiceProvider::class,"
+line = "    App\\Providers\\EssentialsServiceProvider::class,"
+if "EssentialsServiceProvider" in text:
+    raise SystemExit(0)
+if needle in text:
+    text = text.replace(needle, needle + "\n" + line, 1)
+else:
+    # Fallback: insert before closing ]; of returned array
+    import re
+    text2, n = re.subn(
+        r"(\n\s*)(\];\s*)$",
+        r"\1    App\\Providers\\EssentialsServiceProvider::class,\n\1\2",
+        text,
+        count=1,
+        flags=re.M,
+    )
+    if n == 0:
+        raise SystemExit("Could not register EssentialsServiceProvider in bootstrap/providers.php")
+    text = text2
+path.write_text(text)
+PY
+    ok "Registered in bootstrap/providers.php"
+    return 0
+  fi
+
+  if [[ -f "$config_app" ]]; then
+    if grep -q 'EssentialsServiceProvider' "$config_app"; then
+      ok "EssentialsServiceProvider already registered in config/app.php"
+      return 0
+    fi
+    err "Legacy config/app.php providers detected — register ${PROVIDER_FQCN} manually."
+    exit 1
+  fi
+
+  err "Could not find bootstrap/providers.php or config/app.php to register the provider"
+  exit 1
+}
+
+install_make_action() {
+  local cmd_dest="${APP_DIR}/app/Console/Commands/MakeActionCommand.php"
+  local stub_dest="${APP_DIR}/stubs/action.stub"
+
+  if [[ -f "$cmd_dest" ]]; then
+    ok "make:action command already present"
+  else
+    log "Installing make:action command"
+    copy_stub "${STUBS_DIR}/MakeActionCommand.php" "$cmd_dest"
+  fi
+
+  if [[ -f "$stub_dest" ]]; then
+    ok "action.stub already present"
+  else
+    log "Installing stubs/action.stub"
+    copy_stub "${STUBS_DIR}/action.stub" "$stub_dest"
+  fi
+}
+
+install_pint() {
+  local dest="${APP_DIR}/pint.json"
+  log "Writing Essentials-aligned pint.json"
+  copy_stub "${STUBS_DIR}/pint.json" "$dest"
+}
+
+install_rector() {
+  local dest="${APP_DIR}/rector.php"
+  if [[ -f "$dest" ]]; then
+    ok "rector.php already present (left unchanged)"
+    return 0
+  fi
+  log "Adding rector.php from Essentials stub (optional; requires rector/rector to run)"
+  copy_stub "${STUBS_DIR}/rector.php" "$dest"
+}
+
+summarize() {
+  ok "Essentials source translations applied in ${APP_DIR}"
+  cat <<EOF
+
+Applied (source-level, no nunomaduro/essentials package):
+  - ${PROVIDER_PATH} (strict models, eager load, immutable dates, safe console,
+    force HTTPS, Vite prefetch, password defaults, Http/Sleep test safety nets)
+  - Provider registered
+  - php artisan make:action (+ stubs/action.stub)
+  - pint.json (Essentials rules)
+  - rector.php (if missing)
+
+Not applied (matches Essentials package defaults): Unguard
+
+Next: commit this as one atomic commit, then continue with Boost/Wayfinder/tooling.
+EOF
+}
+
+fetch_upstream_check
+write_provider
+register_provider
+install_make_action
+install_pint
+install_rector
+summarize

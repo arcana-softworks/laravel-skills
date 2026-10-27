@@ -1,0 +1,158 @@
+#!/usr/bin/env bash
+# setup-tooling — Boost + Wayfinder (when appropriate) + deps/build/migrate/test.
+#
+# Usage:
+#   setup-tooling [--dir <app>] [--agents cursor,claude_code,codex] [--skip-wayfinder] [--skip-boost]
+set -euo pipefail
+
+APP_DIR="$(pwd)"
+AGENTS="cursor,claude_code,codex"
+SKIP_WAYFINDER=0
+SKIP_BOOST=0
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --dir) APP_DIR="$2"; shift 2 ;;
+    --agents) AGENTS="$2"; shift 2 ;;
+    --skip-wayfinder) SKIP_WAYFINDER=1; shift ;;
+    --skip-boost) SKIP_BOOST=1; shift ;;
+    -h|--help) sed -n '2,8p' "$0"; exit 0 ;;
+    *) echo "Unknown arg: $1" >&2; exit 1 ;;
+  esac
+done
+
+APP_DIR="$(cd "$APP_DIR" && pwd)"
+[[ -f "${APP_DIR}/artisan" ]] || { echo "Not a Laravel app: ${APP_DIR}" >&2; exit 1; }
+
+RED=$'\033[0;31m'; GRN=$'\033[0;32m'; YLW=$'\033[0;33m'; BLU=$'\033[0;34m'; NC=$'\033[0m'
+log()  { printf '%s%s%s\n' "$BLU" "$*" "$NC" >&2; }
+ok()   { printf '%s%s%s\n' "$GRN" "$*" "$NC" >&2; }
+warn() { printf '%s%s%s\n' "$YLW" "$*" "$NC" >&2; }
+
+cd "$APP_DIR"
+
+composer_has() {
+  python3 - "$1" <<'PY'
+import json, sys
+pkg = sys.argv[1]
+data = json.load(open("composer.json"))
+req = {**data.get("require", {}), **data.get("require-dev", {})}
+raise SystemExit(0 if pkg in req else 1)
+PY
+}
+
+# ---------- Composer / NPM install ----------
+log "Installing Composer dependencies..."
+composer install --no-interaction --prefer-dist
+
+if [[ -f package.json ]]; then
+  log "Installing npm dependencies..."
+  npm install
+fi
+
+# ---------- Boost ----------
+if [[ "$SKIP_BOOST" -eq 0 ]]; then
+  if ! composer_has "laravel/boost"; then
+    log "Adding laravel/boost (dev)..."
+    composer require laravel/boost --dev --no-interaction
+  else
+    ok "laravel/boost already required"
+  fi
+
+  # Prefill boost.json so --no-interaction has agents to configure.
+  if [[ ! -f boost.json ]]; then
+    log "Writing boost.json for non-interactive install (agents: ${AGENTS})"
+    python3 - "$AGENTS" <<'PY'
+import json, sys
+agents = [a.strip() for a in sys.argv[1].split(",") if a.strip()]
+data = {
+    "agents": agents,
+    "guidelines": True,
+    "mcp": True,
+    "skills": True,
+}
+with open("boost.json", "w", encoding="utf-8") as fh:
+    json.dump(data, fh, indent=4)
+    fh.write("\n")
+PY
+  fi
+
+  log "Running php artisan boost:install --no-interaction..."
+  php artisan boost:install --no-interaction || warn "boost:install exited non-zero — review boost.json / agent detection"
+else
+  warn "Skipping Boost (--skip-boost)"
+fi
+
+# ---------- Wayfinder ----------
+if [[ "$SKIP_WAYFINDER" -eq 0 ]]; then
+  if composer_has "laravel/wayfinder"; then
+    ok "laravel/wayfinder already present"
+  elif composer_has "inertiajs/inertia-laravel" && { [[ -f vite.config.js ]] || [[ -f vite.config.ts ]]; }; then
+    log "Inertia + Vite detected without Wayfinder — installing..."
+    composer require laravel/wayfinder --no-interaction
+    if [[ -f package.json ]]; then
+      npm install -D @laravel/vite-plugin-wayfinder
+      python3 <<'PY'
+from pathlib import Path
+import re
+
+for name in ("vite.config.ts", "vite.config.js"):
+    path = Path(name)
+    if not path.exists():
+        continue
+    text = path.read_text(encoding="utf-8")
+    if "vite-plugin-wayfinder" in text or "wayfinder(" in text:
+        print(f"{name} already references wayfinder")
+        break
+    if "from '@laravel/vite-plugin-wayfinder'" not in text and 'from "@laravel/vite-plugin-wayfinder"' not in text:
+        text = "import { wayfinder } from '@laravel/vite-plugin-wayfinder';\n" + text
+    if re.search(r"plugins:\s*\[", text) and "wayfinder()" not in text:
+        text = re.sub(r"plugins:\s*\[", "plugins: [\n        wayfinder(),", text, count=1)
+        path.write_text(text, encoding="utf-8")
+        print(f"Updated {name} with wayfinder()")
+    else:
+        path.write_text(text, encoding="utf-8")
+        print(f"Added wayfinder import to {name}; verify plugins array manually if needed")
+    break
+else:
+    print("No vite.config.js/ts found after Wayfinder composer install")
+PY
+    fi
+  else
+    warn "Skipping Wayfinder (not an Inertia/Vite stack, or already handled)"
+  fi
+else
+  warn "Skipping Wayfinder (--skip-wayfinder)"
+fi
+
+# ---------- Env / key / sqlite / migrate / build / test ----------
+if [[ -f .env.example && ! -f .env ]]; then
+  cp .env.example .env
+fi
+php artisan key:generate --force --no-interaction || true
+
+if grep -q '^DB_CONNECTION=sqlite' .env 2>/dev/null || grep -q 'DB_CONNECTION=sqlite' .env.example 2>/dev/null; then
+  mkdir -p database
+  [[ -f database/database.sqlite ]] || touch database/database.sqlite
+fi
+
+php artisan migrate --force --no-interaction || warn "migrate failed or no migrations"
+
+if [[ -f package.json ]]; then
+  log "Building frontend assets..."
+  npm run build || warn "npm run build failed"
+fi
+
+log "Running test suite..."
+php artisan test || warn "tests failed"
+
+if [[ -x vendor/bin/pint ]]; then
+  log "Running Pint..."
+  vendor/bin/pint --parallel || warn "Pint reported issues (not failing tooling setup)"
+fi
+if [[ -x vendor/bin/phpstan ]]; then
+  log "Running PHPStan..."
+  vendor/bin/phpstan analyse || warn "PHPStan reported issues (not failing tooling setup)"
+fi
+
+ok "Tooling setup finished in ${APP_DIR}"

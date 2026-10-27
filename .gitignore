@@ -1,11 +1,10 @@
-.cache/
-# KIT_CACHE override may point elsewhere; keep default cache local
 .DS_Store
+.idea/
+.vscode/
+*.log
 *.sqlite
 .env
 vendor/
 node_modules/
+.cache/
 /tmp/
-*.log
-.idea/
-.vscode/

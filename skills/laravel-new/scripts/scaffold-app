@@ -1,0 +1,159 @@
+#!/usr/bin/env bash
+# scaffold-app — create a fresh Laravel app with a chosen starter kit.
+#
+# Usage:
+#   scaffold-app <name> [options]
+#
+# Options:
+#   --kit <react|vue|svelte|livewire|none|using:PACKAGE_OR_URL>
+#                          Starter kit (default: react)
+#   --database <driver>    mysql|mariadb|pgsql|sqlite|sqlsrv (default: sqlite)
+#   --pest | --phpunit     Testing framework (default: phpunit)
+#   --no-auth              Use blank kit variant / no auth scaffolding when supported
+#   --workos               Use WorkOS auth (official kits)
+#   --teams                Install teams support (official kits)
+#   --force                Overwrite existing directory
+#   --parent <dir>         Parent directory (default: cwd)
+#
+# Prefers `laravel new`; falls back to `composer create-project` when the
+# installer is missing. Does NOT apply Essentials, Boost, or Wayfinder.
+set -euo pipefail
+
+RED=$'\033[0;31m'; GRN=$'\033[0;32m'; YLW=$'\033[0;33m'; BLU=$'\033[0;34m'; NC=$'\033[0m'
+log()  { printf '%s%s%s\n' "$BLU" "$*" "$NC" >&2; }
+ok()   { printf '%s%s%s\n' "$GRN" "$*" "$NC" >&2; }
+warn() { printf '%s%s%s\n' "$YLW" "$*" "$NC" >&2; }
+err()  { printf '%s%s%s\n' "$RED" "$*" "$NC" >&2; }
+
+NAME=""
+KIT="react"
+DATABASE="sqlite"
+TEST_FRAMEWORK="phpunit"
+NO_AUTH=0
+WORKOS=0
+TEAMS=0
+FORCE=0
+PARENT="$(pwd)"
+
+usage() {
+  sed -n '2,22p' "$0"
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --kit) KIT="$2"; shift 2 ;;
+    --database) DATABASE="$2"; shift 2 ;;
+    --pest) TEST_FRAMEWORK="pest"; shift ;;
+    --phpunit) TEST_FRAMEWORK="phpunit"; shift ;;
+    --no-auth) NO_AUTH=1; shift ;;
+    --workos) WORKOS=1; shift ;;
+    --teams) TEAMS=1; shift ;;
+    --force) FORCE=1; shift ;;
+    --parent) PARENT="$2"; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    -*)
+      err "Unknown option: $1"
+      usage
+      exit 1
+      ;;
+    *)
+      if [[ -z "$NAME" ]]; then NAME="$1"; shift; else err "Unexpected arg: $1"; exit 1; fi
+      ;;
+  esac
+done
+
+[[ -n "$NAME" ]] || { err "App name required"; usage; exit 1; }
+PARENT="$(cd "$PARENT" && pwd)"
+APP_DIR="${PARENT}/${NAME}"
+
+if [[ -e "$APP_DIR" && "$FORCE" -ne 1 ]]; then
+  err "Directory exists: ${APP_DIR} (pass --force)"
+  exit 1
+fi
+
+has_laravel_installer() {
+  command -v laravel >/dev/null 2>&1
+}
+
+build_laravel_new_args() {
+  local -a args=("$NAME" "--database=${DATABASE}" "--no-interaction")
+  [[ "$FORCE" -eq 1 ]] && args+=("--force")
+  [[ "$TEST_FRAMEWORK" == "pest" ]] && args+=("--pest") || args+=("--phpunit")
+  # Skip boost during scaffold — skill applies Boost in a later commit.
+  args+=("--no-boost")
+  # Node install happens in tooling commit; skip here for a clean scaffold commit
+  # when we will reinstall anyway. Prefer leaving node for tooling phase.
+  args+=("--no-node")
+
+  case "$KIT" in
+    react) args+=("--react") ;;
+    vue) args+=("--vue") ;;
+    svelte) args+=("--svelte") ;;
+    livewire) args+=("--livewire") ;;
+    none) ;;
+    using:*)
+      args+=("--using=${KIT#using:}")
+      ;;
+    *)
+      # Treat unknown values as community --using package/URL
+      args+=("--using=${KIT}")
+      ;;
+  esac
+
+  [[ "$NO_AUTH" -eq 1 ]] && args+=("--no-authentication")
+  [[ "$WORKOS" -eq 1 ]] && args+=("--workos")
+  [[ "$TEAMS" -eq 1 ]] && args+=("--teams")
+
+  printf '%s\n' "${args[@]}"
+}
+
+composer_package_for_kit() {
+  case "$KIT" in
+    react) echo "laravel/react-starter-kit" ;;
+    vue) echo "laravel/vue-starter-kit" ;;
+    svelte) echo "laravel/svelte-starter-kit" ;;
+    livewire) echo "laravel/livewire-starter-kit" ;;
+    none) echo "laravel/laravel" ;;
+    using:*) echo "${KIT#using:}" ;;
+    *) echo "$KIT" ;;
+  esac
+}
+
+scaffold_with_installer() {
+  log "Using Laravel installer..."
+  mapfile -t args < <(build_laravel_new_args)
+  (cd "$PARENT" && laravel new "${args[@]}")
+}
+
+scaffold_with_composer() {
+  warn "laravel installer not found — falling back to composer create-project"
+  local pkg
+  pkg="$(composer_package_for_kit)"
+  # URL-shaped --using values are not valid composer packages.
+  if [[ "$pkg" == *"://"* ]]; then
+    err "Kit '${pkg}' looks like a URL. Install the Laravel installer to use tiged-based --using kits,"
+    err "or pass a Packagist package name."
+    exit 1
+  fi
+  local -a args=(create-project "$pkg" "$APP_DIR" --stability=dev --no-interaction)
+  [[ "$FORCE" -eq 1 ]] && args+=("--force")
+  (cd "$PARENT" && composer "${args[@]}")
+  # Minimal env bootstrap (installer normally does this)
+  if [[ -f "${APP_DIR}/.env.example" && ! -f "${APP_DIR}/.env" ]]; then
+    cp "${APP_DIR}/.env.example" "${APP_DIR}/.env"
+  fi
+  if [[ -f "${APP_DIR}/artisan" ]]; then
+    (cd "$APP_DIR" && php artisan key:generate --force --no-interaction || true)
+  fi
+}
+
+log "Scaffolding ${NAME} (kit=${KIT}, database=${DATABASE}, tests=${TEST_FRAMEWORK})"
+if has_laravel_installer; then
+  scaffold_with_installer
+else
+  scaffold_with_composer
+fi
+
+[[ -d "$APP_DIR" ]] || { err "Scaffold failed — missing ${APP_DIR}"; exit 1; }
+ok "Scaffold ready at ${APP_DIR}"
+printf '%s\n' "$APP_DIR"

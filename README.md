@@ -1,142 +1,79 @@
-# Laravel React starter + Essentials (patch-based)
+# laravel-new-skill
 
-Start from the **official** [Laravel Inertia React starter kit](https://github.com/laravel/react-starter-kit) and apply [Nuno Maduro’s Essentials](https://github.com/nunomaduro/essentials) recommendations as a **maintained source patch set** — **not** by requiring `nunomaduro/essentials` in Composer.
+Public Agent Skill that scaffolds a new Laravel app (any official or community starter kit), applies [Nuno Maduro’s Essentials](https://github.com/nunomaduro/essentials) as **plain source changes** (never `composer require nunomaduro/essentials`), then sets up Laravel Boost and Wayfinder when appropriate.
 
-## Create an app
-
-```bash
-laravel new my-app --using=https://github.com/arcana-softworks/laravel-react
-```
-
-The Laravel installer uses [tiged](https://github.com/tiged/tiged) under the hood for URL-shaped `--using` values (`npx tiged@latest … && composer install`). That clones the repo **default branch** (`main`), which is the generated full app.
-
-Alternative (from a clone of the **`develop`** source branch):
+## Install
 
 ```bash
-git clone -b develop https://github.com/arcana-softworks/laravel-react.git
-cd laravel-react
-./bin/kit create my-app
+npx skills add arcana-softworks/laravel-new-skill
 ```
 
-Optional future route: publish to [Packagist](https://packagist.org) (set `kit.composer_name` in `versions.json`, rematerialize, then `laravel new my-app --using=your-vendor/your-package:dev-main`).
-
-## Branch layout
-
-| Branch | Role |
-|--------|------|
-| **`main`** (default) | Generated installable Laravel + React app. **Never hand-edit.** Produced by `bin/kit materialize --push`. |
-| **`develop`** | Source of truth: `patches/`, `bin/kit`, `versions.json`, docs, skills, CI. |
-
-You are reading the maintainer README on **`develop`**. The GitHub home page (`main`) shows the generated app’s upstream starter README — switch to the `develop` branch for this document and the agent skill.
-
-## Pinned upstreams
-
-See [`versions.json`](versions.json). Current patch set built against:
-
-| Project | Ref |
-|---------|-----|
-| `laravel/react-starter-kit` | `dbd4817d2d2936be14bc1ca7c94692fcef20b6b1` |
-| `nunomaduro/essentials` | `v1.2.0` (`c5458ca…`) |
-| Materialized app branch | `main` (default / tiged HEAD) |
-
-Feature → file mapping: [`docs/ESSENTIALS_MAPPING.md`](docs/ESSENTIALS_MAPPING.md).
-
-This repo is the single source of truth for:
-
-1. **Patches + tooling** — `patches/`, `bin/kit`, CI sync on `develop`
-2. **Materialized installable app** — default branch `main` (generated only) for `laravel new --using=…`
-3. **Agent skill** — `skills/laravel-react-essentials/SKILL.md`
-
-## How `laravel new --using` works
-
-From `laravel/installer` v5:
-
-| `--using` value | Installer behaviour |
-|-----------------|---------------------|
-| **Contains `://`** (and not a first-party `laravel/*` kit) | `npx tiged@latest {using} "{dir}" && composer install` |
-| **No `://`** (Packagist / Composer package) | `composer create-project {using} "{dir}" --stability=dev` |
-
-No branch suffix is required: tiged clones the default branch. Patches remain the source of truth on `develop`; never edit `main` by hand.
-
-### Chisel / `install:features`
-
-The official starter runs `install:features` from Composer / installer hooks. The Laravel installer sets `LARAVEL_INSTALLER_DEFER_HOOKS=1` during `create-project`, then runs deferred hooks afterward. Prefer **`laravel new --using=…`** over raw `composer install` when you want that behaviour. Materialize **does not** run Composer or Chisel; it only writes the source tree.
-
-## Local one-command (without the installer)
+That discovers `skills/laravel-new/SKILL.md` and installs the skill for your coding agents. Useful variants:
 
 ```bash
-./bin/kit create my-app
-cd my-app
-composer install --no-interaction --prefer-dist --no-scripts
-php artisan package:discover
-cp -n .env.example .env && php artisan key:generate --force
-mkdir -p database && touch database/database.sqlite && php artisan migrate --force
-npm install && npm run build
+# List skills in this repo
+npx skills add arcana-softworks/laravel-new-skill --list
+
+# Install only this skill, globally, for specific agents
+npx skills add arcana-softworks/laravel-new-skill --skill laravel-new -g -a cursor -a claude-code -a codex -y
+
+# All agents, non-interactive
+npx skills add arcana-softworks/laravel-new-skill --all
 ```
 
-## CLI reference
+### Cursor / Claude Code / Codex
+
+| Agent | Typical project path after `npx skills add` | Notes |
+|-------|-----------------------------------------------|--------|
+| **Cursor** | `.cursor/skills/laravel-new` or shared `.agents/skills/laravel-new` | Also works with `-a cursor` |
+| **Claude Code** | `.claude/skills/laravel-new` | `-a claude-code` |
+| **Codex** | `.agents/skills/laravel-new` | `-a codex` |
+
+Use `-g` to install into your user-level skills directory instead of the current project. After install, ask the agent for a “new Laravel app” (or similar); it should load **laravel-new**.
+
+Equivalent with GitHub CLI (if you prefer):
 
 ```bash
-./bin/kit help
-./bin/kit versions
-./bin/kit fetch
-./bin/kit apply --dir <app>
-./bin/kit sync
-./bin/kit check-upstreams
-./bin/kit regenerate --dir <patched-app>
-./bin/kit materialize          # build .cache/materialized
-./bin/kit materialize --push   # build + force-push generated branch main
-./bin/kit create my-app
-./bin/kit verify
+gh skill install arcana-softworks/laravel-new-skill laravel-new --agent cursor
 ```
 
-### Regenerating patches
+## What the skill does
 
-1. `./bin/kit fetch --ref <new-starter-sha>`
-2. Fix/apply until Pint / PHPStan / tests are green
-3. `./bin/kit regenerate --dir /path/to/working-tree`
-4. Update `versions.json` + `docs/ESSENTIALS_MAPPING.md` if needed
-5. `./bin/kit verify` then `./bin/kit materialize --push`
+1. **Scaffold** with `laravel new` (falls back to `composer create-project`) — default kit **Inertia React**; also Vue, Svelte, Livewire, none, or any `--using=` package/URL. Commit 1 = untouched scaffold.
+2. **Apply Essentials as source** via `scripts/apply-essentials` (dedicated provider + `make:action` + Pint/Rector stubs). Re-checks the live Essentials README so new recommendations are not missed silently. Commit 2 = one atomic Essentials commit.
+3. **Tooling** via `scripts/setup-tooling`: Laravel Boost (`boost:install --no-interaction`), Wayfinder when the stack is Inertia/Vite and it is not already present, composer/npm install, key, sqlite migrate, build, tests. Separate commit(s) after Essentials.
 
-## What the patches change
-
-Runtime (in `AppServiceProvider`): strict models, automatic eager loading, immutable dates, prohibit destructive commands in production, force HTTPS in production, aggressive Vite prefetching, Essentials-aligned password defaults, `Http::preventStrayRequests()` + `Sleep::fake()` during unit tests.
-
-Tooling: Essentials `pint.json`, `rector.php`, and `php artisan make:action` (+ stub).
-
-Code style: Essentials Pint rules across the skeleton.
-
-**Not** applied: `Unguard` (disabled in Essentials by default). **Not** added: `nunomaduro/essentials` package.
-
-## Agent skill
-
-Follow [`skills/laravel-react-essentials/SKILL.md`](skills/laravel-react-essentials/SKILL.md). Prefer `laravel new --using=…` against default `main`; otherwise scaffold + `bin/kit apply` with exactly two commits.
-
-## CI sync
-
-| Workflow | Lives on | Triggers |
-|----------|----------|----------|
-| [`.github/workflows/sync.yml`](.github/workflows/sync.yml) | `develop` | push / PR to `develop`, `workflow_dispatch`, and `workflow_call` |
-| `upstream-sync-schedule.yml` (injected) | generated `main` | weekday `schedule` + `workflow_dispatch` only |
-
-The schedule file must sit on the **default branch** (GitHub only runs cron there). Materialize injects a thin dispatcher that calls the reusable `sync.yml` on `develop`, gated to `arcana-softworks/laravel-react`, and marks it `export-ignore` so tiged tarballs omit it when GitHub honors export-ignore. Pushing regenerated `main` does not re-run the develop workflow (no `on.push` for `main`).
-
-Needs `contents: write` to force-push `main`. No app secrets are stored in this public repo.
-
-## Layout (`develop`)
+## Layout
 
 ```
-bin/kit
-patches/series
-patches/0001-….patch …
-versions.json
-templates/upstream-sync-schedule.yml
-docs/ESSENTIALS_MAPPING.md
-skills/laravel-react-essentials/SKILL.md
-.github/workflows/sync.yml
-# branch main → generated full app only (not present on develop)
+skills/laravel-new/
+  SKILL.md                 # agent instructions
+  scripts/
+    scaffold-app           # laravel new / composer create-project
+    apply-essentials       # idempotent Essentials source translation
+    setup-tooling          # Boost, Wayfinder, deps, build, test
+  reference/
+    ESSENTIALS.md          # feature → source mapping
+    stubs/                 # pint, rector, make:action, action.stub
+```
+
+## Manual script usage
+
+```bash
+git clone https://github.com/arcana-softworks/laravel-new-skill.git
+SKILL=./laravel-new-skill/skills/laravel-new
+chmod +x "$SKILL/scripts/"*
+
+"$SKILL/scripts/scaffold-app" my-app --kit react --database sqlite --phpunit
+cd my-app && git init -b main && git add -A && git commit -m "Scaffold Laravel application"
+
+"$SKILL/scripts/apply-essentials" --dir .
+git add -A && git commit -m "Apply Nuno Maduro Essentials recommendations as source (not nunomaduro/essentials)"
+
+"$SKILL/scripts/setup-tooling" --dir . --agents cursor,claude_code,codex
+git add -A && git commit -m "Install Laravel Boost, Wayfinder (if needed), and project tooling"
 ```
 
 ## License
 
-Patch tooling and docs: MIT. Upstream Laravel starter kit and Essentials remain under their respective licenses.
+MIT. Upstream Laravel, Essentials, Boost, and Wayfinder remain under their respective licenses.

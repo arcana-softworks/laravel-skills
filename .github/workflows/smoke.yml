@@ -1,0 +1,73 @@
+name: skill-smoke
+
+# Smoke-test the skill scripts against a fresh laravel new (React).
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: skill-smoke-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  react-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mbstring, xml, curl, zip, sqlite3, bcmath, intl
+          coverage: none
+          tools: composer:v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Laravel installer
+        run: composer global require laravel/installer --no-interaction
+
+      - name: Scaffold + Essentials + tooling (React)
+        env:
+          PATH: /home/runner/.config/composer/vendor/bin:/home/runner/.composer/vendor/bin:${{ env.PATH }}
+        run: |
+          set -euo pipefail
+          chmod +x skills/laravel-new/scripts/*
+          SKILL="$PWD/skills/laravel-new"
+          WORK="$RUNNER_TEMP/skill-smoke"
+          mkdir -p "$WORK"
+          "$SKILL/scripts/scaffold-app" smoke-react --kit react --database sqlite --phpunit --parent "$WORK"
+          APP="$WORK/smoke-react"
+          cd "$APP"
+          git init -b main
+          git config user.email "smoke@example.com"
+          git config user.name "smoke"
+          git add -A
+          git commit -m "Scaffold Laravel application (official react starter kit)"
+          "$SKILL/scripts/apply-essentials" --dir "$APP"
+          # Essentials must not add the composer package
+          ! grep -q 'nunomaduro/essentials' composer.json
+          test -f app/Providers/EssentialsServiceProvider.php
+          grep -q EssentialsServiceProvider bootstrap/providers.php
+          git add -A
+          git commit -m "Apply Nuno Maduro Essentials recommendations as source (not nunomaduro/essentials)"
+          "$SKILL/scripts/setup-tooling" --dir "$APP" --agents cursor --skip-boost
+          php artisan test
+          vendor/bin/pint --parallel --test
+          vendor/bin/phpstan analyse
+          php artisan tinker --execute '
+          $id = App\Models\User::factory()->create()->id;
+          $u = App\Models\User::query()->findOrFail($id);
+          try { $u->totally_missing_attr; echo "strict FAIL\n"; exit(1); }
+          catch (Throwable $e) { echo "strict OK\n"; }
+          echo get_class(Illuminate\Support\Facades\Date::now()), "\n";
+          '
+          test "$(git rev-list --count HEAD)" -ge 2
