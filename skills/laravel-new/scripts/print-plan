@@ -1,0 +1,117 @@
+#!/usr/bin/env bash
+# print-plan — emit the laravel-new numbered change plan for plan-and-confirm.
+#
+# Usage:
+#   print-plan [--kit <react|vue|svelte|livewire|none|using:...>]
+#              [--database <driver>] [--pest|--phpunit]
+#              [--agents <list>] [--pm <npm|pnpm|yarn|bun>]
+#              [--app <name>] [--skip <step>]...
+#
+# Prints a numbered list tailored to kit + package manager. Skipped steps are
+# omitted (or marked when --show-skipped). Exit 0 always on success.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/steps.sh
+source "${SCRIPT_DIR}/lib/steps.sh"
+
+KIT="react"
+DATABASE="sqlite"
+TEST_FRAMEWORK="phpunit"
+AGENTS="cursor,claude_code,codex"
+PM_LABEL="npm (default; follow kit lockfile after scaffold)"
+APP_NAME="my-app"
+SHOW_SKIPPED=0
+
+parse_skip_args "$@"
+set -- "${STEPS_REMAINING_ARGS[@]}"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --kit) KIT="$2"; shift 2 ;;
+    --database) DATABASE="$2"; shift 2 ;;
+    --pest) TEST_FRAMEWORK="pest"; shift ;;
+    --phpunit) TEST_FRAMEWORK="phpunit"; shift ;;
+    --agents) AGENTS="$2"; shift 2 ;;
+    --pm)
+      PM_LABEL="$2 (explicit --pm)"
+      shift 2
+      ;;
+    --app) APP_NAME="$2"; shift 2 ;;
+    --show-skipped) SHOW_SKIPPED=1; shift ;;
+    -h|--help) sed -n '2,14p' "$0"; exit 0 ;;
+    *) echo "Unknown arg: $1" >&2; exit 1 ;;
+  esac
+done
+
+kit_label() {
+  case "$KIT" in
+    react) echo "Inertia React (--react)" ;;
+    vue) echo "Inertia Vue (--vue)" ;;
+    svelte) echo "Inertia Svelte (--svelte)" ;;
+    livewire) echo "Livewire (--livewire)" ;;
+    none) echo "no starter kit" ;;
+    using:*) echo "community kit ${KIT#using:}" ;;
+    *) echo "$KIT" ;;
+  esac
+}
+
+WAYFINDER_LIKELY=0
+case "$KIT" in
+  react|vue|svelte) WAYFINDER_LIKELY=1 ;;
+esac
+
+JS_VIA_VP=0
+case "$KIT" in
+  react|vue|svelte) JS_VIA_VP=1 ;;
+esac
+
+echo "laravel-new plan for \`${APP_NAME}\`"
+echo "Kit: $(kit_label) · DB: ${DATABASE} · PHP tests: ${TEST_FRAMEWORK}"
+echo "Package manager: ${PM_LABEL}"
+echo "Boost agents: ${AGENTS}"
+echo
+echo "Proposed changes (reply with edits, removals by step id, or 'go ahead'):"
+echo
+
+n=0
+emit() {
+  local id="$1"
+  local detail="$2"
+  if ! step_enabled "$id"; then
+    if [[ "$SHOW_SKIPPED" -eq 1 ]]; then
+      n=$((n + 1))
+      printf '%d. [SKIPPED] %s — %s\n' "$n" "$id" "$detail"
+    fi
+    return 0
+  fi
+  n=$((n + 1))
+  printf '%d. [%s] %s\n' "$n" "$id" "$detail"
+}
+
+emit scaffold "Create \`${APP_NAME}\` with $(kit_label), ${DATABASE}, ${TEST_FRAMEWORK}"
+emit essentials "Apply Essentials: EssentialsServiceProvider (strict models, eager load, CarbonImmutable, prohibit destructive commands, forceHttps, Vite prefetch, password defaults, Http/Sleep test nets), register provider, make:action + stub, pint.json (+ optional rector.php)"
+emit boost "Install laravel/boost (dev) and run boost:install for agents: ${AGENTS}"
+
+if [[ "$WAYFINDER_LIKELY" -eq 1 ]]; then
+  emit wayfinder "Install laravel/wayfinder + @laravel/vite-plugin-wayfinder if the kit did not already"
+else
+  emit wayfinder "Wayfinder only if Inertia + Vite are detected (likely skipped for this kit)"
+fi
+
+if [[ "$JS_VIA_VP" -eq 1 ]]; then
+  emit js-fmt-lint "Prefer vite-plus: wire fmt/lint/types/build scripts to vp (typeAware + typeCheck in vite.config); remove Prettier/ESLint leftovers"
+else
+  emit js-fmt-lint "No vite-plus expected — install oxfmt/oxlint/oxlint-tsgolint and configure .oxfmtrc / .oxlintrc fallback"
+fi
+
+emit anti-slop "Vendor dmmulroy/anti-slop → tools/oxlint/anti-slop, pin @oxlint/plugins to oxlint, register jsPlugins/rules/ignores in vite lint (or .oxlintrc)"
+emit vitest "Add Vitest smoke test + resources/js/vitest.setup.ts and test:js (vp test or vitest run)"
+emit ci "Write .github/workflows/ci.yml with parallel php + js check/dry-run jobs (lint covers anti-slop via npm run lint)"
+emit commits "Commit layout: (1) scaffold (2) essentials (3) tooling — never squash essentials into scaffold"
+
+echo
+echo "Step ids (for --skip): ${LARAVEL_NEW_STEPS[*]}"
+if [[ "$(list_skipped_steps | wc -l | tr -d ' ')" != "0" ]]; then
+  echo "Already skipped: $(list_skipped_steps | tr '\n' ' ')"
+fi
