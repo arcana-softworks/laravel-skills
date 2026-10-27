@@ -36,10 +36,9 @@ jobs:
         run: composer global require laravel/installer --no-interaction
 
       - name: Scaffold + Essentials + tooling (React)
-        env:
-          PATH: /home/runner/.config/composer/vendor/bin:/home/runner/.composer/vendor/bin:${{ env.PATH }}
         run: |
           set -euo pipefail
+          export PATH="${HOME}/.config/composer/vendor/bin:${HOME}/.composer/vendor/bin:${PATH}"
           chmod +x skills/laravel-new/scripts/*
           SKILL="$PWD/skills/laravel-new"
           WORK="$RUNNER_TEMP/skill-smoke"
@@ -60,6 +59,8 @@ jobs:
           git add -A
           git commit -m "Apply Nuno Maduro Essentials recommendations as source (not nunomaduro/essentials)"
           "$SKILL/scripts/setup-tooling" --dir "$APP" --agents cursor
+          git add -A
+          git diff --cached --quiet || git commit -m "Install Laravel Boost, Wayfinder (if needed), and project tooling"
           php artisan test
           vendor/bin/pint --parallel --test
           vendor/bin/phpstan analyse
