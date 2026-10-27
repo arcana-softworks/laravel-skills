@@ -82,6 +82,13 @@ jobs:
           test ! -e resources/js/jest.setup.ts
           grep -q 'typeCheck: true' vite.config.ts
           test -f package-lock.json
+          # Generated app CI workflow (check/dry-run only)
+          test -f .github/workflows/ci.yml
+          grep -q 'pint --parallel --test' .github/workflows/ci.yml
+          grep -q 'format:check' .github/workflows/ci.yml
+          grep -q 'test:js' .github/workflows/ci.yml
+          grep -q 'phpstan analyse' .github/workflows/ci.yml
+          ! grep -E 'pint --parallel[[:space:]]*$|pint --parallel --dirty|oxfmt[[:space:]]*$|vp fmt[[:space:]]*$|check:fix|--fix' .github/workflows/ci.yml
           # Default path is npm (lockfile); scripts must not require --legacy-peer-deps
           ! grep -R -- '--legacy-peer-deps' "$SKILL/scripts"
           php artisan tinker --execute '

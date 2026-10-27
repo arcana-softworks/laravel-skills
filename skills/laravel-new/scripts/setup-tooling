@@ -148,6 +148,11 @@ if [[ -f package.json ]]; then
   "${SCRIPT_DIR}/setup-js-tooling" "${js_args[@]}"
 fi
 
+# ---------- App CI workflow (check/dry-run only) ----------
+log "Writing .github/workflows/ci.yml..."
+chmod +x "${SCRIPT_DIR}/setup-ci-workflow"
+"${SCRIPT_DIR}/setup-ci-workflow" --dir "$APP_DIR"
+
 # ---------- Env / key / sqlite / migrate / build / test ----------
 if [[ -f .env.example && ! -f .env ]]; then
   cp .env.example .env

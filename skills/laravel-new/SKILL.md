@@ -50,7 +50,7 @@ Use **pnpm** (or yarn/bun) only when the user explicitly asks. Then pass `--pm p
 
 1. **Scaffold** — untouched kit  
 2. **Essentials** — sensible PHP defaults only (one atomic commit)  
-3. **Tooling** — Boost, Wayfinder (if needed), vite-plus/`vp` (or oxfmt/oxlint/Vitest fallback), deps, build, tests  
+3. **Tooling** — Boost, Wayfinder (if needed), vite-plus/`vp` (or oxfmt/oxlint/Vitest fallback), app `.github/workflows/ci.yml`, deps, build, tests  
 
 ### 1) Scaffold
 
@@ -105,9 +105,11 @@ JS standard — **prefer vite-plus** on React/Vue/Svelte kits (config in `vite.c
 | JS tests | `test:js` | `LARAVEL_BYPASS_ENV_CHECK=1 vp test` | `vitest run` (same env prefix if `laravel-vite-plugin` is present) |
 | Build | `build` | `vp build` | kit default |
 
+`setup-tooling` also writes **`.github/workflows/ci.yml`** via `setup-ci-workflow` (see `reference/github/ci.yml.example`): parallel `php` and `js` jobs on `push` to `main` and `pull_request`. Check/dry-run only (`pint --test`, PHPStan, Rector `--dry-run` when installed, `php artisan test`, plus present JS scripts). Skips missing tools; uses the detected package manager and PHP version from `composer.json`.
+
 ### 4) Summarize for the user
 
-App path, kit, three commits, PHP defaults present, Boost/Wayfinder/JS tooling status, PHP + `test:js` / format / lint / types / build results.
+App path, kit, three commits, PHP defaults present, Boost/Wayfinder/JS tooling/CI status, PHP + `test:js` / format / lint / types / build results.
 
 ## Rules
 
@@ -116,3 +118,4 @@ App path, kit, three commits, PHP defaults present, Boost/Wayfinder/JS tooling s
 - Keep PHP tests (`php artisan test`) and JS tests (`npm run test:js`) separate.
 - Prefer `vp` whenever `vite-plus` is present; only install oxfmt/oxlint/Vitest directly as a fallback.
 - Follow the kit package manager from the lockfile (default npm); switch to pnpm/yarn/bun only on explicit user request (`--pm`).
+- Generated app CI must stay check/dry-run only (never write or auto-fix).

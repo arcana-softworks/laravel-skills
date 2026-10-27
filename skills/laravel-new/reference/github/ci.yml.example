@@ -1,0 +1,74 @@
+# Example shape of the workflow written by scripts/setup-ci-workflow.
+# The real file is generated per-app (tools, PHP/Node versions, and package
+# manager are detected). All steps are check / dry-run only — never write/fix.
+#
+# Triggers: push to main, pull_request
+# Jobs: php | js (parallel; js omitted when no frontend scripts)
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  php:
+    name: php
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: shivammathur/setup-php@2.40.0
+        with:
+          php-version: '8.3'
+          extensions: mbstring, xml, curl, zip, sqlite3, bcmath, intl
+          coverage: none
+          tools: composer:v2
+      - uses: actions/cache@v5
+        # composer cache…
+      - run: composer install --no-interaction --prefer-dist --no-progress
+      # When Vite/Wayfinder assets are required for feature tests:
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: |
+          cp .env.example .env
+          php artisan key:generate --force --no-interaction
+          mkdir -p database && touch database/database.sqlite
+          php artisan migrate --force --no-interaction
+      - run: vendor/bin/pint --parallel --test
+      - run: vendor/bin/phpstan analyse --no-progress
+      # Only when rector/rector is installed:
+      # - run: vendor/bin/rector process --dry-run --no-progress-bar
+      - run: php artisan test
+
+  js:
+    name: js
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      # PHP+composer when Wayfinder/Vite build needs artisan:
+      - uses: shivammathur/setup-php@2.40.0
+        with:
+          php-version: '8.3'
+      - run: composer install --no-interaction --prefer-dist --no-progress
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run format:check
+      - run: npm run lint
+      - run: npm run types
+      - run: npm run build
+      - run: npm run test:js

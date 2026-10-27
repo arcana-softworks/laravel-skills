@@ -35,7 +35,7 @@ Scaffolds a new Laravel app (any official or community starter kit), applies **s
 
 1. **Scaffold** — `laravel new` (or `composer create-project`). Default kit: Inertia React. Commit 1.
 2. **Essentials** — self-contained PHP snippets / `apply-essentials` (strict models, immutable dates, safe console, HTTPS, Vite prefetch, test Http/Sleep nets, `make:action`, Pint). One atomic commit.
-3. **Tooling** — Boost, Wayfinder on Inertia/Vite if missing, **vite-plus `vp`** JS tooling (or oxfmt/oxlint/Vitest fallback), build, PHP tests. Separate commit.
+3. **Tooling** — Boost, Wayfinder on Inertia/Vite if missing, **vite-plus `vp`** JS tooling (or oxfmt/oxlint/Vitest fallback), generated app **`.github/workflows/ci.yml`**, build, PHP tests. Separate commit.
 
 ### JS standard
 
@@ -53,16 +53,21 @@ On vite-plus kits, configure `fmt` / `lint` / `test` in `vite.config` (enable `l
 
 Scripts detect the JS package manager from the lockfile (`package-lock.json` → npm, `pnpm-lock.yaml` → pnpm, `yarn.lock` → yarn, `bun.lockb`/`bun.lock` → bun), defaulting to **npm** when no lockfile exists. Pass `--pm pnpm` (or `yarn`/`bun`) to `setup-tooling` / `setup-js-tooling` only when the user explicitly requests that manager — that swaps conflicting lockfiles and rewrites `composer.json` scripts that invoke npm/pnpm/yarn/bun.
 
+### Generated app CI
+
+`setup-ci-workflow` writes `.github/workflows/ci.yml` with parallel **php** and **js** jobs (check/dry-run only). It enables Pint `--test`, PHPStan, Rector `--dry-run`, and PHPUnit/Pest via `php artisan test` when those tools exist, plus whichever of `format:check` / `lint` / `types` / `test:js` / `build` are present as package scripts. Actions use Node-24-compatible majors (`actions/checkout@v5`, `actions/setup-node@v5`, `actions/cache@v5`).
+
 ### Layout
 
 ```
 skills/laravel-new/
   SKILL.md
-  scripts/scaffold-app | apply-essentials | setup-tooling | setup-js-tooling
+  scripts/scaffold-app | apply-essentials | setup-tooling | setup-js-tooling | setup-ci-workflow
   scripts/lib/package-manager.sh   # lockfile PM detect + --pm switch
   reference/ESSENTIALS.md          # paste-ready PHP snippets
   reference/stubs/                 # pint, rector, make:action
   reference/js/                    # ox* configs (fallback) + Vitest smoke
+  reference/github/ci.yml.example  # shape of generated app CI
 ```
 
 ### Manual usage
