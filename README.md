@@ -1,6 +1,6 @@
 # laravel-new-skill
 
-Public Agent Skill that scaffolds a new Laravel app (any official or community starter kit), applies **sensible Laravel source defaults**, then sets up Boost, Wayfinder (when needed), and JS tooling (**oxfmt**, **oxlint** type-aware, **Vitest**).
+Public Agent Skill that scaffolds a new Laravel app (any official or community starter kit), applies **sensible Laravel source defaults**, then sets up Boost, Wayfinder (when needed), and JS tooling via **vite-plus (`vp`)** when the kit ships it (oxfmt/oxlint/Vitest fallback otherwise).
 
 ## Install
 
@@ -24,17 +24,19 @@ npx skills add arcana-softworks/laravel-new-skill --all
 
 1. **Scaffold** — `laravel new` (or `composer create-project`). Default kit: Inertia React. Commit 1.
 2. **Essentials** — self-contained PHP snippets / `apply-essentials` (strict models, immutable dates, safe console, HTTPS, Vite prefetch, test Http/Sleep nets, `make:action`, Pint). One atomic commit.
-3. **Tooling** — Boost, Wayfinder on Inertia/Vite if missing, **oxfmt** + **oxlint** (+ **oxlint-tsgolint**), **Vitest** (`test:js` → kit `vp test` when `vite-plus` is present), build, PHP tests. Separate commit.
+3. **Tooling** — Boost, Wayfinder on Inertia/Vite if missing, **vite-plus `vp`** JS tooling (or oxfmt/oxlint/Vitest fallback), build, PHP tests. Separate commit.
 
 ### JS standard
 
-| Concern | Tool | npm scripts |
-|---------|------|-------------|
-| Format | oxfmt | `format`, `format:check` |
-| Lint + TS | oxlint (type-aware / type-check via oxlint-tsgolint) | `lint`, `types` |
-| JS tests | Vitest (via vite-plus `vp test`, or direct `vitest run`) | `test:js` |
+| Concern | npm scripts | With `vite-plus` | Fallback |
+|---------|-------------|------------------|----------|
+| Format | `format`, `format:check` | `vp fmt`, `vp fmt --check` | `oxfmt` |
+| Lint | `lint` | `vp lint` | `oxlint` |
+| Types | `types` | `vp check --no-fmt --no-lint` | `oxlint --type-aware --type-check` |
+| JS tests | `test:js` | `vp test` | `vitest run` |
+| Build | `build` | `vp build` | kit default |
 
-Replaces Prettier/ESLint configs and `vp check` / `tsc --noEmit` script aliases. Uses the kit’s Vite+/Vitest toolchain when available. PHP stays on Pest/PHPUnit via `php artisan test`.
+On vite-plus kits, configure `fmt` / `lint` / `test` in `vite.config` (enable `lint.options.typeAware` + `typeCheck`). Do **not** add direct `oxfmt` / `oxlint` / `oxlint-tsgolint` deps or `.oxfmtrc.json` / `.oxlintrc.json`. PHP stays on Pest/PHPUnit via `php artisan test`.
 
 ## Layout
 
@@ -44,7 +46,7 @@ skills/laravel-new/
   scripts/scaffold-app | apply-essentials | setup-tooling | setup-js-tooling
   reference/ESSENTIALS.md          # paste-ready PHP snippets
   reference/stubs/                 # pint, rector, make:action
-  reference/js/                    # .oxfmtrc.json, .oxlintrc.json, Vitest smoke
+  reference/js/                    # ox* configs (fallback) + Vitest smoke
 ```
 
 ## Manual usage
@@ -59,7 +61,7 @@ cd my-app && git init -b main && git add -A && git commit -m "Scaffold Laravel a
 git add -A && git commit -m "Apply sensible Laravel defaults"
 
 "$SKILL/scripts/setup-tooling" --dir . --agents cursor,claude_code,codex
-git add -A && git commit -m "Install Boost, Wayfinder, oxfmt/oxlint/Vitest, and project tooling"
+git add -A && git commit -m "Install Boost, Wayfinder, vite-plus/vp JS tooling, and project tooling"
 
 npm run format:check && npm run lint && npm run types && npm run test:js && npm run build
 php artisan test

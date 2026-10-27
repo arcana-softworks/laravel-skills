@@ -128,9 +128,9 @@ else
   warn "Skipping Wayfinder (--skip-wayfinder)"
 fi
 
-# ---------- JS: oxfmt + oxlint (type-aware) + Vitest ----------
+# ---------- JS: vite-plus (vp) or oxfmt/oxlint + Vitest fallback ----------
 if [[ -f package.json ]]; then
-  log "Configuring oxfmt / oxlint / Vitest..."
+  log "Configuring JS tooling (prefer vite-plus vp)..."
   chmod +x "${SCRIPT_DIR}/setup-js-tooling"
   "${SCRIPT_DIR}/setup-js-tooling" --dir "$APP_DIR"
 fi

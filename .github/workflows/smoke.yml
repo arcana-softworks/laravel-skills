@@ -59,7 +59,7 @@ jobs:
           git commit -m "Apply sensible Laravel defaults (strict models, immutable dates, make:action, Pint)"
           "$SKILL/scripts/setup-tooling" --dir "$APP" --agents cursor
           git add -A
-          git diff --cached --quiet || git commit -m "Install Boost, Wayfinder, oxfmt/oxlint/Vitest, and project tooling"
+          git diff --cached --quiet || git commit -m "Install Boost, Wayfinder, vite-plus/vp JS tooling, and project tooling"
           php artisan test
           vendor/bin/pint --parallel --test
           vendor/bin/phpstan analyse
@@ -68,12 +68,19 @@ jobs:
           npm run types
           npm run test:js
           npm run build
-          # No Jest leftovers
-          ! grep -E '"jest"|jest\.config|@swc/jest|jest-environment-jsdom|"@types/jest"' package.json
+          # vite-plus path: scripts call vp; no direct ox*/Jest deps or separate ox configs
+          grep -q '"format": "vp fmt"' package.json
+          grep -q '"format:check": "vp fmt --check"' package.json
+          grep -q '"lint": "vp lint"' package.json
+          grep -q '"types": "vp check --no-fmt --no-lint"' package.json
+          grep -q '"test:js": "vp test"' package.json
+          ! grep -E '"oxfmt"|"oxlint"|"oxlint-tsgolint"|"jest"|@swc/jest|jest-environment-jsdom|"@types/jest"' package.json
+          test ! -e .oxfmtrc.json
+          test ! -e .oxlintrc.json
           test ! -e jest.config.cjs
           test ! -e jest.config.js
           test ! -e resources/js/jest.setup.ts
-          grep -q '"test:js": "vp test"' package.json
+          grep -q 'typeCheck: true' vite.config.ts
           php artisan tinker --execute '
           $id = App\Models\User::factory()->create()->id;
           $u = App\Models\User::query()->findOrFail($id);
