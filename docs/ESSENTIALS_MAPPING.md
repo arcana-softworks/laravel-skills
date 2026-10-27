@@ -40,3 +40,7 @@ With Essentials’ Pint rules enabled, the third patch applies the resulting sty
 ## Already overlapped by the official starter kit
 
 As of the pinned starter SHA, the upstream kit already configured immutable dates, destructive-command prohibition, and production password defaults. The runtime patch keeps those behaviors and aligns password defaults with Essentials (`max(255)`, skip under unit tests).
+
+## Installable tree
+
+`bin/kit materialize --push` applies this mapping onto the pinned starter and force-pushes orphan branch `kit` (Composer package name from `versions.json` → `kit.composer_name`). That branch is what `laravel new --using=…:dev-kit` consumes. Do not hand-edit it.
