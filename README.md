@@ -1,15 +1,17 @@
-# arcana-softworks/skills
+# arcana-softworks/laravel-skills
 
-Public collection of Agent Skills for Cursor, Claude Code, Codex, and compatible agents.
+Public collection of Laravel-focused Agent Skills for Cursor, Claude Code, Codex, and compatible agents.
 
 Install the collection (or a single skill):
 
 ```bash
-npx skills add arcana-softworks/skills
-npx skills add arcana-softworks/skills --list
-npx skills add arcana-softworks/skills --skill laravel-new -g -a cursor -a claude-code -a codex -y
-npx skills add arcana-softworks/skills --all
+npx skills add arcana-softworks/laravel-skills
+npx skills add arcana-softworks/laravel-skills --list
+npx skills add arcana-softworks/laravel-skills --skill laravel-new -g -a cursor -a claude-code -a codex -y
+npx skills add arcana-softworks/laravel-skills --all
 ```
+
+Repo: https://github.com/arcana-softworks/laravel-skills
 
 ## Skills
 
