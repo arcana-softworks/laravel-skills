@@ -23,17 +23,20 @@ Shared source of truth:
 
 ## Preferred: `laravel new --using`
 
-When branch `kit` exists on the remote (CI/`bin/kit materialize --push`):
+Public GitHub kit branch (tiged under the hood):
 
 ```bash
-# Public Packagist (after you publish kit.composer_name):
-laravel new my-app --using=local/laravel-react-kit:dev-kit
-
-# Private Origin — configure Composer VCS + auth first (see README), then same --using.
-# Public GitHub mirror (tiged): laravel new my-app --using=https://github.com/OWNER/REPO/tree/kit
+laravel new my-app --using=https://github.com/arcana-softworks/laravel-react/tree/kit
+# shorthand: arcana-softworks/laravel-react#kit
 ```
 
-Read `kit.composer_name` and `kit.branch` from `versions.json` (`dev-<branch>`). Do not invent package names.
+Alternative from a clone of this repo:
+
+```bash
+./bin/kit create my-app
+```
+
+Optional later: Packagist after you publish `kit.composer_name` from `versions.json` (`laravel new my-app --using=your-vendor/your-package:dev-kit`).
 
 After `laravel new`, verify with Pint / PHPStan / `php artisan test` / `npm run build` as needed. Confirm Essentials behaviours (strict models, immutable dates, etc.) and that `composer.json` does **not** require `nunomaduro/essentials`.
 

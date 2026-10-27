@@ -43,4 +43,10 @@ As of the pinned starter SHA, the upstream kit already configured immutable date
 
 ## Installable tree
 
-`bin/kit materialize --push` applies this mapping onto the pinned starter and force-pushes orphan branch `kit` (Composer package name from `versions.json` → `kit.composer_name`). That branch is what `laravel new --using=…:dev-kit` consumes. Do not hand-edit it.
+`bin/kit materialize --push` applies this mapping onto the pinned starter and force-pushes orphan branch `kit`. Consumers install with:
+
+```bash
+laravel new my-app --using=https://github.com/arcana-softworks/laravel-react/tree/kit
+```
+
+(Optional Packagist later: `kit.composer_name` → `dev-kit`.) Do not hand-edit branch `kit`.

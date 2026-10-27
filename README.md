@@ -2,6 +2,22 @@
 
 Start from the **official** [Laravel Inertia React starter kit](https://github.com/laravel/react-starter-kit) and apply [Nuno Maduro’s Essentials](https://github.com/nunomaduro/essentials) recommendations as a **maintained source patch set** — **not** by requiring `nunomaduro/essentials` in Composer.
 
+## Create an app
+
+```bash
+laravel new my-app --using=https://github.com/arcana-softworks/laravel-react/tree/kit
+```
+
+The Laravel installer uses [tiged](https://github.com/tiged/tiged) under the hood for URL-shaped `--using` values (`npx tiged@latest … && composer install`). Equivalent shorthand: `arcana-softworks/laravel-react#kit`.
+
+Alternative (from a clone of this repo, no installer):
+
+```bash
+./bin/kit create my-app
+```
+
+Optional future route: publish branch `kit` to [Packagist](https://packagist.org) (set `kit.composer_name` in `versions.json`, rematerialize, then `laravel new my-app --using=your-vendor/your-package:dev-kit`).
+
 This repo is the single source of truth for:
 
 1. **Patches + tooling** — `patches/`, `bin/kit`, scheduled CI sync  
@@ -16,7 +32,7 @@ See [`versions.json`](versions.json). Current patch set built against:
 |---------|-----|
 | `laravel/react-starter-kit` | `dbd4817d2d2936be14bc1ca7c94692fcef20b6b1` |
 | `nunomaduro/essentials` | `v1.2.0` (`c5458ca…`) |
-| Materialized Composer package | `local/laravel-react-kit` on branch `kit` → version `dev-kit` |
+| Materialized kit branch | `kit` (tiged / optional Packagist `dev-kit`) |
 
 Feature → file mapping: [`docs/ESSENTIALS_MAPPING.md`](docs/ESSENTIALS_MAPPING.md).
 
@@ -26,60 +42,10 @@ From `laravel/installer` v5:
 
 | `--using` value | Installer behaviour |
 |-----------------|---------------------|
-| **No `://` in the string** (Packagist / Composer package) | `composer create-project {using} "{dir}" --stability=dev` |
 | **Contains `://`** (and not a first-party `laravel/*` kit) | `npx tiged@latest {using} "{dir}" && composer install` |
+| **No `://`** (Packagist / Composer package) | `composer create-project {using} "{dir}" --stability=dev` |
 
-`tiged` only understands **GitHub / GitLab / Bitbucket / Sourcehut / Hugging Face**. It does **not** speak Cursor Origin. For Origin-hosted (or other private) remotes, use the **Composer package** form below.
-
-Branch `kit` on this repo is an **orphan full-app tree** produced by `bin/kit materialize --push` from `patches/` + the pinned upstream. Patches remain the source of truth; never edit `kit` by hand.
-
-### Exact command (Composer / Packagist-style)
-
-Default package name (change in `versions.json` → `kit.composer_name` before publishing):
-
-```bash
-laravel new my-app --using=local/laravel-react-kit:dev-kit
-```
-
-That resolves Composer version `dev-kit` → git branch `kit`.
-
-#### A) Public Packagist (best for others)
-
-1. Set `kit.composer_name` to your Packagist name and rematerialize (`bin/kit materialize --push`).
-2. Submit the package on [Packagist](https://packagist.org) with the VCS URL; ensure Packagist tracks branch `kit` (or tags cut from it).
-3. Consumers run:
-
-```bash
-laravel new my-app --using=your-vendor/your-package:dev-kit
-```
-
-No extra Composer config once Packagist is public.
-
-#### B) Public GitHub mirror (tiged URL form)
-
-Mirror/push this repo (or only branch `kit`) to GitHub, then:
-
-```bash
-laravel new my-app --using=https://github.com/OWNER/REPO/tree/kit
-# tiged also accepts: OWNER/REPO#kit
-```
-
-#### C) Private Cursor Origin (or other private Git)
-
-`tiged` cannot fetch Origin. Configure Composer to see the VCS repo, then use the package form:
-
-```bash
-# Once per machine (use a token that can read the repo)
-composer config repositories.laravel-react-kit vcs https://origin.cursor.com/git/OWNER/REPO.git
-
-# Auth — pick what your forge supports, e.g. HTTP basic or a URL with a token:
-composer config http-basic.origin.cursor.com x-access-token YOUR_TOKEN
-# or: git credential / insteadOf / netrc
-
-laravel new my-app --using=local/laravel-react-kit:dev-kit
-```
-
-If the repo is only on Origin and never published to Packagist/GitHub, **every consumer** needs that `repositories` (+ auth) config. Publishing to Packagist or a public GitHub `kit` branch removes that requirement.
+Branch `kit` is an **orphan full-app tree** produced by `bin/kit materialize --push` from `patches/` + the pinned upstream. Patches remain the source of truth; never edit `kit` by hand.
 
 ### Chisel / `install:features`
 
@@ -137,14 +103,14 @@ Follow [`skills/laravel-react-essentials/SKILL.md`](skills/laravel-react-essenti
 
 ## CI sync
 
-[`.github/workflows/sync.yml`](.github/workflows/sync.yml) on schedule / push to `main`:
+[`.github/workflows/sync.yml`](.github/workflows/sync.yml) runs on a weekday schedule, push to `main`, and manual `workflow_dispatch`:
 
-1. `check-upstreams`
-2. Apply patches to pinned starter and current upstream `main`
+1. `check-upstreams` (starter kit + Essentials past pinned refs)
+2. Apply patches to the pinned starter and current upstream `main`
 3. Pint / PHPStan / PHPUnit / `npm run build`
-4. `bin/kit materialize --push` (refreshes orphan `kit` branch)
+4. On `main` (not PRs): `bin/kit materialize --push` via `GITHUB_TOKEN` (`contents: write`)
 
-Needs `contents: write` (or equivalent) to push `kit`. No app secrets are stored in the repo.
+Triggers are limited to `main` (and schedule / dispatch) so regenerating `kit` does not re-run the workflow. No app secrets are stored in this public repo.
 
 ## Layout
 

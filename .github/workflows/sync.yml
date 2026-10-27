@@ -2,14 +2,16 @@ name: upstream-sync
 
 # Scheduled + on-demand: keep patches applying to the official React starter kit,
 # verify lint/tests/build, and regenerate the materialized `kit` branch for
-# `laravel new --using=…`. Compatible with GitHub Actions and Depot CI on Origin.
+# `laravel new --using=https://github.com/arcana-softworks/laravel-react/tree/kit`.
 
 on:
   schedule:
     - cron: '15 6 * * 1-5'
   push:
+    # Only main — kit-branch pushes from materialize must not re-trigger this workflow.
     branches: [main]
   pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -29,6 +31,9 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          # Persist credentials so bin/kit materialize --push can force-push kit
+          # with the workflow GITHUB_TOKEN (contents: write).
+          persist-credentials: true
 
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
@@ -63,7 +68,7 @@ jobs:
           bin/kit fetch
           bin/kit apply --dir .cache/starter
 
-      - name: Also try applying against origin/main (early warning)
+      - name: Also try applying against upstream main (early warning)
         id: sync_main
         continue-on-error: true
         run: |
@@ -116,27 +121,29 @@ jobs:
         run: php artisan test
 
       - name: Materialize and push kit branch
-        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule')
+        # Never on PRs; only on main (push / schedule / dispatch). kit pushes do not match `on.push.branches: [main]`.
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         run: |
           set -euo pipefail
           # Regenerates the orphan `kit` branch from patches (never hand-edited).
-          # Required for: laravel new my-app --using=<composer_name>:dev-kit
-          git config user.name "kit-bot"
-          git config user.email "kit-bot@users.noreply.github.com"
+          # Required for: laravel new my-app --using=https://github.com/arcana-softworks/laravel-react/tree/kit
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           bin/kit materialize --push
 
       - name: Summarize
         if: always()
         run: |
           set -euo pipefail
-          PKG=$(python3 -c 'import json;print(json.load(open("versions.json"))["kit"]["composer_name"])')
+          USING=$(python3 -c 'import json;d=json.load(open("versions.json"));print(d["kit"].get("using_url","https://github.com/arcana-softworks/laravel-react/tree/kit"))')
           BR=$(python3 -c 'import json;print(json.load(open("versions.json"))["kit"]["branch"])')
           echo "### Upstream sync" >> "$GITHUB_STEP_SUMMARY"
           echo "- Pinned starter: \`$(python3 -c 'import json;print(json.load(open("versions.json"))["starter_kit"]["ref"])')\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- Pinned essentials: \`$(python3 -c 'import json;d=json.load(open("versions.json"));print(d["essentials"]["ref"], d["essentials"]["commit"])')\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- Upstreams moved: \`${{ steps.upstreams.outputs.changed }}\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Apply on origin/main: \`${{ steps.sync_main.outputs.main_apply }}\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- \`laravel new\` package: \`${PKG}:dev-${BR}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Apply on upstream main: \`${{ steps.sync_main.outputs.main_apply }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- \`laravel new --using\`: \`${USING}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Materialized branch: \`${BR}\`" >> "$GITHUB_STEP_SUMMARY"
           if [[ "${{ steps.sync_main.outcome }}" == "failure" ]]; then
             echo "" >> "$GITHUB_STEP_SUMMARY"
             echo "**Action needed:** patches no longer apply to upstream main. Fix with \`bin/kit regenerate --dir <working-tree>\`." >> "$GITHUB_STEP_SUMMARY"

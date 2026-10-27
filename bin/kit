@@ -68,12 +68,11 @@ Environment:
   KIT_CACHE   Override cache directory (default: <repo>/.cache)
 
 laravel new --using:
-  After materialize --push, consumers use the Composer package name on branch kit
-  (see versions.json kit.composer_name / kit.branch), e.g.:
+  After materialize --push, consumers use the public kit branch (tiged):
 
-    laravel new my-app --using=local/laravel-react-kit:dev-kit
+    laravel new my-app --using=https://github.com/arcana-softworks/laravel-react/tree/kit
 
-  See README for Packagist, public GitHub/tiged, and private Origin auth.
+  See README for the bin/kit create alternative and optional Packagist.
 
 Examples:
   $(basename "$0") materialize --push
@@ -549,8 +548,8 @@ Next steps:
   composer install --no-interaction --prefer-dist
   # Prefer laravel new --using=… for full installer/Chisel hook behaviour.
 
-  Or use the materialized kit branch:
-    laravel new ${name} --using=$(kit_composer_name):dev-$(kit_branch)
+  Or use the materialized kit branch (tiged):
+    laravel new ${name} --using=https://github.com/arcana-softworks/laravel-react/tree/kit
 EOF
 }
 
@@ -574,7 +573,8 @@ cmd_verify() {
   ok "Verify OK on ${dir}"
   echo "Pinned starter:    $(starter_ref)"
   echo "Pinned essentials: $(essentials_ref) ($(essentials_commit))"
-  echo "Kit package:       $(kit_composer_name) (branch $(kit_branch) => dev-$(kit_branch))"
+  echo "Kit using URL:     https://github.com/arcana-softworks/laravel-react/tree/$(kit_branch)"
+  echo "Kit package (opt): $(kit_composer_name) (branch $(kit_branch) => dev-$(kit_branch))"
 }
 
 cmd_versions() {
