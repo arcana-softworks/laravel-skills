@@ -65,11 +65,12 @@ if [[ "$SKIP_BOOST" -eq 0 ]]; then
     python3 - "$AGENTS" <<'PY'
 import json, sys
 agents = [a.strip() for a in sys.argv[1].split(",") if a.strip()]
+# skills must be an array (Boost Config::getSkills typed as array).
 data = {
     "agents": agents,
     "guidelines": True,
     "mcp": True,
-    "skills": True,
+    "skills": [],
 }
 with open("boost.json", "w", encoding="utf-8") as fh:
     json.dump(data, fh, indent=4)
@@ -147,8 +148,8 @@ log "Running test suite..."
 php artisan test || warn "tests failed"
 
 if [[ -x vendor/bin/pint ]]; then
-  log "Running Pint..."
-  vendor/bin/pint --parallel || warn "Pint reported issues (not failing tooling setup)"
+  log "Running Pint (--test)..."
+  vendor/bin/pint --parallel --test || warn "Pint reported issues (not failing tooling setup)"
 fi
 if [[ -x vendor/bin/phpstan ]]; then
   log "Running PHPStan..."

@@ -102,7 +102,7 @@ known = {
   "immutable dates", "force https", "safe console", "asset prefetching",
   "prevent stray requests", "fake sleep", "artisan commands", "make:action",
   "essentials:pint", "essentials:rector", "features", "installation", "configuration",
-  "table of contents", "license", "contributing",
+  "table of contents", "license", "contributing", "roadmap", "support", "credits",
 }
 heads = re.findall(r"^#{2,3}\s+(.+)$", text, flags=re.M)
 new = []
@@ -319,6 +319,48 @@ install_pint() {
   copy_stub "${STUBS_DIR}/pint.json" "$dest"
 }
 
+# When Pint's final_class rule makes User final, Unique is Stringable not ValidationRule.
+fix_profile_validation_phpdoc() {
+  local file="${APP_DIR}/app/Concerns/ProfileValidationRules.php"
+  [[ -f "$file" ]] || return 0
+  if grep -q 'Stringable' "$file"; then
+    ok "ProfileValidationRules PHPDoc already includes Stringable"
+    return 0
+  fi
+  log "Updating ProfileValidationRules PHPDoc for final User + Rule::unique()"
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    return 0
+  fi
+  python3 - "$file" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+if "Stringable" in text:
+    raise SystemExit(0)
+old_use = "use Illuminate\\Contracts\\Validation\\ValidationRule;\nuse Illuminate\\Validation\\Rule;"
+new_use = "use Illuminate\\Contracts\\Validation\\ValidationRule;\nuse Illuminate\\Support\\Stringable;\nuse Illuminate\\Validation\\Rule;"
+if old_use not in text:
+    # Still try to insert Stringable import after ValidationRule import
+    if "use Illuminate\\Contracts\\Validation\\ValidationRule;" in text and "Stringable" not in text:
+        text = text.replace(
+            "use Illuminate\\Contracts\\Validation\\ValidationRule;",
+            "use Illuminate\\Contracts\\Validation\\ValidationRule;\nuse Illuminate\\Support\\Stringable;",
+            1,
+        )
+    else:
+        raise SystemExit("Could not locate imports in ProfileValidationRules.php")
+else:
+    text = text.replace(old_use, new_use, 1)
+text = text.replace(
+    "@return array<int, ValidationRule|array<mixed>|string>",
+    "@return array<int, ValidationRule|Stringable|array<mixed>|string>",
+)
+path.write_text(text, encoding="utf-8")
+PY
+  ok "Updated ProfileValidationRules PHPDoc"
+}
+
 install_rector() {
   local dest="${APP_DIR}/rector.php"
   if [[ -f "$dest" ]]; then
@@ -327,6 +369,18 @@ install_rector() {
   fi
   log "Adding rector.php from Essentials stub (optional; requires rector/rector to run)"
   copy_stub "${STUBS_DIR}/rector.php" "$dest"
+}
+
+run_pint_if_available() {
+  if [[ -x "${APP_DIR}/vendor/bin/pint" ]]; then
+    log "Running Pint with Essentials rules (keeps style inside the Essentials commit)"
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+      return 0
+    fi
+    (cd "$APP_DIR" && vendor/bin/pint --parallel) || warn "Pint reported issues"
+  else
+    warn "vendor/bin/pint not found — run composer install / Pint after scaffolding"
+  fi
 }
 
 summarize() {
@@ -338,7 +392,7 @@ Applied (source-level, no nunomaduro/essentials package):
     force HTTPS, Vite prefetch, password defaults, Http/Sleep test safety nets)
   - Provider registered
   - php artisan make:action (+ stubs/action.stub)
-  - pint.json (Essentials rules)
+  - pint.json (Essentials rules) + Pint pass when vendor present
   - rector.php (if missing)
 
 Not applied (matches Essentials package defaults): Unguard
@@ -352,5 +406,7 @@ write_provider
 register_provider
 install_make_action
 install_pint
+fix_profile_validation_phpdoc
 install_rector
+run_pint_if_available
 summarize

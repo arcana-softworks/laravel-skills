@@ -59,7 +59,7 @@ jobs:
           grep -q EssentialsServiceProvider bootstrap/providers.php
           git add -A
           git commit -m "Apply Nuno Maduro Essentials recommendations as source (not nunomaduro/essentials)"
-          "$SKILL/scripts/setup-tooling" --dir "$APP" --agents cursor --skip-boost
+          "$SKILL/scripts/setup-tooling" --dir "$APP" --agents cursor
           php artisan test
           vendor/bin/pint --parallel --test
           vendor/bin/phpstan analyse
@@ -70,4 +70,4 @@ jobs:
           catch (Throwable $e) { echo "strict OK\n"; }
           echo get_class(Illuminate\Support\Facades\Date::now()), "\n";
           '
-          test "$(git rev-list --count HEAD)" -ge 2
+          test "$(git rev-list --count HEAD)" -ge 3
