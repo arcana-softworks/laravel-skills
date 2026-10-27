@@ -26,8 +26,9 @@ Shared source of truth:
 Public GitHub kit branch (tiged under the hood):
 
 ```bash
-laravel new my-app --using=https://github.com/arcana-softworks/laravel-react/tree/kit
+laravel new my-app --using=https://github.com/arcana-softworks/laravel-react#kit
 # shorthand: arcana-softworks/laravel-react#kit
+# Do not use /tree/kit — tiged treats that as a subdirectory, not a branch.
 ```
 
 Alternative from a clone of this repo:

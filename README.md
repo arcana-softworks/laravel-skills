@@ -5,10 +5,12 @@ Start from the **official** [Laravel Inertia React starter kit](https://github.c
 ## Create an app
 
 ```bash
-laravel new my-app --using=https://github.com/arcana-softworks/laravel-react/tree/kit
+laravel new my-app --using=https://github.com/arcana-softworks/laravel-react#kit
 ```
 
 The Laravel installer uses [tiged](https://github.com/tiged/tiged) under the hood for URL-shaped `--using` values (`npx tiged@latest … && composer install`). Equivalent shorthand: `arcana-softworks/laravel-react#kit`.
+
+> **Note:** Use `#kit` (tiged’s branch/ref syntax). GitHub’s browse URL `/tree/kit` is **not** understood by tiged — it treats `/tree/kit` as a subdirectory and clones `HEAD` instead.
 
 Alternative (from a clone of this repo, no installer):
 

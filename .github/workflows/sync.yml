@@ -2,7 +2,7 @@ name: upstream-sync
 
 # Scheduled + on-demand: keep patches applying to the official React starter kit,
 # verify lint/tests/build, and regenerate the materialized `kit` branch for
-# `laravel new --using=https://github.com/arcana-softworks/laravel-react/tree/kit`.
+# `laravel new --using=https://github.com/arcana-softworks/laravel-react#kit`.
 
 on:
   schedule:
@@ -126,7 +126,7 @@ jobs:
         run: |
           set -euo pipefail
           # Regenerates the orphan `kit` branch from patches (never hand-edited).
-          # Required for: laravel new my-app --using=https://github.com/arcana-softworks/laravel-react/tree/kit
+          # Required for: laravel new my-app --using=https://github.com/arcana-softworks/laravel-react#kit
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           bin/kit materialize --push
@@ -135,7 +135,7 @@ jobs:
         if: always()
         run: |
           set -euo pipefail
-          USING=$(python3 -c 'import json;d=json.load(open("versions.json"));print(d["kit"].get("using_url","https://github.com/arcana-softworks/laravel-react/tree/kit"))')
+          USING=$(python3 -c 'import json;d=json.load(open("versions.json"));print(d["kit"].get("using_url","https://github.com/arcana-softworks/laravel-react#kit"))')
           BR=$(python3 -c 'import json;print(json.load(open("versions.json"))["kit"]["branch"])')
           echo "### Upstream sync" >> "$GITHUB_STEP_SUMMARY"
           echo "- Pinned starter: \`$(python3 -c 'import json;print(json.load(open("versions.json"))["starter_kit"]["ref"])')\`" >> "$GITHUB_STEP_SUMMARY"

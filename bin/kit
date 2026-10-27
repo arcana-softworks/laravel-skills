@@ -70,7 +70,7 @@ Environment:
 laravel new --using:
   After materialize --push, consumers use the public kit branch (tiged):
 
-    laravel new my-app --using=https://github.com/arcana-softworks/laravel-react/tree/kit
+    laravel new my-app --using=https://github.com/arcana-softworks/laravel-react#kit
 
   See README for the bin/kit create alternative and optional Packagist.
 
@@ -550,7 +550,7 @@ Next steps:
   # Prefer laravel new --using=… for full installer/Chisel hook behaviour.
 
   Or use the materialized kit branch (tiged):
-    laravel new ${name} --using=https://github.com/arcana-softworks/laravel-react/tree/kit
+    laravel new ${name} --using=https://github.com/arcana-softworks/laravel-react#kit
 EOF
 }
 
