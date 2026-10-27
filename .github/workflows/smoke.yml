@@ -90,9 +90,10 @@ jobs:
           grep -q "tools/oxlint/anti-slop" vite.config.ts
           grep -q "anti-slop/require-readable-spacing" vite.config.ts
           test ! -d "$SKILL/reference/anti-slop"
-          # plan-and-confirm helper lists step ids
-          "$SKILL/scripts/print-plan" --app smoke-react --kit react | grep -q '\[anti-slop\]'
-          "$SKILL/scripts/print-plan" --app smoke-react --kit react --skip boost --skip vitest | grep -q 'Already skipped: boost vitest'
+          # plan-and-confirm helper lists step ids (grep without -q so the
+          # producer is not SIGPIPE'd under `set -o pipefail`)
+          "$SKILL/scripts/print-plan" --app smoke-react --kit react | grep '\[anti-slop\]' >/dev/null
+          "$SKILL/scripts/print-plan" --app smoke-react --kit react --skip boost --skip vitest | grep 'Already skipped: boost vitest' >/dev/null
           # Generated app CI workflow (check/dry-run only); lint job covers anti-slop via vp lint
           test -f .github/workflows/ci.yml
           grep -q 'pint --parallel --test' .github/workflows/ci.yml
@@ -113,7 +114,7 @@ jobs:
           grep -q 'healthcheck-schedule' docker-compose.prod.yml
           grep -q 'name: docker' .github/workflows/ci.yml
           grep -q 'push: false' .github/workflows/ci.yml
-          "$SKILL/scripts/print-plan" --app smoke-react --kit react | grep -q '\[docker\]'
+          "$SKILL/scripts/print-plan" --app smoke-react --kit react | grep '\[docker\]' >/dev/null
           # Default path is npm (lockfile); scripts must not require --legacy-peer-deps
           ! grep -R -- '--legacy-peer-deps' "$SKILL/scripts"
           php artisan tinker --execute '

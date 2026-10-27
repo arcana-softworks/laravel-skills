@@ -69,6 +69,11 @@ case "$KIT" in
   react|vue|svelte) JS_VIA_VP=1 ;;
 esac
 
+# Output phase: consumers often pipe through `grep -q` / `head`. Ignore SIGPIPE
+# and disable errexit so an early reader exit cannot fail a successful plan.
+trap '' PIPE
+set +e
+
 echo "laravel-new plan for \`${APP_NAME}\`"
 echo "Kit: $(kit_label) · DB: ${DATABASE} · PHP tests: ${TEST_FRAMEWORK}"
 echo "Package manager: ${PM_LABEL}"
@@ -120,3 +125,5 @@ echo "Step ids (for --skip): ${LARAVEL_NEW_STEPS[*]}"
 if [[ "$(list_skipped_steps | wc -l | tr -d ' ')" != "0" ]]; then
   echo "Already skipped: $(list_skipped_steps | tr '\n' ' ')"
 fi
+
+exit 0
