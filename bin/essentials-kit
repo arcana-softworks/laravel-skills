@@ -1,0 +1,461 @@
+#!/usr/bin/env bash
+# essentials-kit — fetch laravel/react-starter-kit, apply Essentials source patches,
+# regenerate patches, and create apps. Does NOT require nunomaduro/essentials.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PATCHES_DIR="${ROOT}/patches"
+SERIES_FILE="${PATCHES_DIR}/series"
+VERSIONS_FILE="${ROOT}/versions.json"
+CACHE_DIR="${ESSENTIALS_KIT_CACHE:-${ROOT}/.cache}"
+
+RED=$'\033[0;31m'
+GRN=$'\033[0;32m'
+YLW=$'\033[0;33m'
+BLU=$'\033[0;34m'
+NC=$'\033[0m'
+
+log()  { printf '%s%s%s\n' "${BLU}" "$*" "${NC}"; }
+ok()   { printf '%s%s%s\n' "${GRN}" "$*" "${NC}"; }
+warn() { printf '%s%s%s\n' "${YLW}" "$*" "${NC}"; }
+err()  { printf '%s%s%s\n' "${RED}" "$*" "${NC}" >&2; }
+
+need_cmd() {
+  command -v "$1" >/dev/null 2>&1 || { err "Missing required command: $1"; exit 1; }
+}
+
+json_get() {
+  # json_get <file> <python.expr yielding value>
+  local file="$1"
+  local expr="$2"
+  python3 - "$file" "$expr" <<'PY'
+import json, sys
+data = json.load(open(sys.argv[1]))
+print(eval(sys.argv[2], {"data": data}))
+PY
+}
+
+read_series() {
+  [[ -f "$SERIES_FILE" ]] || { err "Missing patch series: $SERIES_FILE"; exit 1; }
+  grep -vE '^\s*(#|$)' "$SERIES_FILE"
+}
+
+starter_repo() { json_get "$VERSIONS_FILE" 'data["starter_kit"]["repository"]'; }
+starter_ref()  { json_get "$VERSIONS_FILE" 'data["starter_kit"]["ref"]'; }
+essentials_repo() { json_get "$VERSIONS_FILE" 'data["essentials"]["repository"]'; }
+essentials_ref()  { json_get "$VERSIONS_FILE" 'data["essentials"]["ref"]'; }
+essentials_commit() { json_get "$VERSIONS_FILE" 'data["essentials"]["commit"]'; }
+
+usage() {
+  cat <<EOF
+Usage: $(basename "$0") <command> [options]
+
+Commands:
+  fetch [--ref <sha|branch|tag>]   Fetch/update the official React starter kit into .cache/
+  apply [--dir <path>]             Apply the Essentials patch series (to --dir or .cache/starter)
+  sync                             Fetch latest upstream main, apply patches, report status
+  check-upstreams                  Report whether starter-kit / Essentials moved past pinned refs
+  regenerate --dir <patched-tree>  Rebuild patches/* from a working tree vs the pinned upstream
+  create <name> [--force]          One-command: fetch pinned kit, apply patches, write ./<name>
+  verify [--dir <path>]            Apply to a temp (or given) tree and print a summary
+  versions                         Show pinned upstream versions
+  help                             Show this help
+
+Environment:
+  ESSENTIALS_KIT_CACHE   Override cache directory (default: <repo>/.cache)
+
+Examples:
+  $(basename "$0") create my-app
+  $(basename "$0") sync
+  $(basename "$0") regenerate --dir /path/to/patched-app
+EOF
+}
+
+ensure_git_apply() {
+  need_cmd git
+  need_cmd python3
+}
+
+fetch_starter() {
+  ensure_git_apply
+  local ref="${1:-$(starter_ref)}"
+  local dest="${CACHE_DIR}/starter"
+  mkdir -p "$CACHE_DIR"
+
+  if [[ -d "${dest}/.git" ]]; then
+    log "Updating cached starter kit at ${dest} ..."
+    git -C "$dest" fetch --tags origin
+    git -C "$dest" checkout --force "$ref"
+    git -C "$dest" reset --hard "$ref"
+    git -C "$dest" clean -fd
+  else
+    log "Cloning $(starter_repo) @ ${ref} ..."
+    rm -rf "$dest"
+    git clone "$(starter_repo)" "$dest"
+    git -C "$dest" checkout --force "$ref"
+  fi
+
+  local head
+  head="$(git -C "$dest" rev-parse HEAD)"
+  ok "Starter kit ready: ${head}"
+  printf '%s\n' "$head"
+}
+
+apply_patches() {
+  ensure_git_apply
+  local target="${1:-}"
+  if [[ -z "$target" ]]; then
+    target="${CACHE_DIR}/starter"
+  fi
+  target="$(cd "$target" && pwd)"
+
+  [[ -d "$target" ]] || { err "Target directory not found: $target"; exit 1; }
+  [[ -f "$target/artisan" ]] || { err "Not a Laravel app (missing artisan): $target"; exit 1; }
+
+  local patch failed=0
+  log "Applying Essentials patches to ${target} ..."
+  while IFS= read -r patch; do
+    local path="${PATCHES_DIR}/${patch}"
+    [[ -f "$path" ]] || { err "Missing patch file: $path"; exit 1; }
+
+    if git -C "$target" apply --check "$path" 2>/tmp/essentials-kit-apply.err; then
+      git -C "$target" apply "$path"
+      ok "  applied ${patch}"
+    else
+      err "  FAILED ${patch}"
+      err "  ---- git apply --check output ----"
+      cat /tmp/essentials-kit-apply.err >&2 || true
+      err "  ----------------------------------"
+      err "  Patch no longer applies cleanly. Update the working tree, then run:"
+      err "    $(basename "$0") regenerate --dir <patched-tree>"
+      failed=1
+      break
+    fi
+  done < <(read_series)
+
+  if [[ "$failed" -ne 0 ]]; then
+    return 1
+  fi
+
+  ok "All patches applied successfully."
+  return 0
+}
+
+check_upstreams() {
+  ensure_git_apply
+  need_cmd curl
+  mkdir -p "$CACHE_DIR"
+
+  local starter_pin essentials_pin
+  starter_pin="$(starter_ref)"
+  essentials_pin="$(essentials_commit)"
+
+  log "Checking laravel/react-starter-kit ..."
+  local starter_remote
+  starter_remote="$(git ls-remote "$(starter_repo)" refs/heads/main | awk '{print $1}')"
+  if [[ -z "$starter_remote" ]]; then
+    err "Could not resolve starter kit main SHA"
+    return 1
+  fi
+
+  log "Checking nunomaduro/essentials ..."
+  local essentials_remote essentials_latest_tag
+  essentials_remote="$(git ls-remote "$(essentials_repo)" refs/heads/main | awk '{print $1}')"
+  essentials_latest_tag="$(git ls-remote --tags --refs "$(essentials_repo)" 'v*' | awk '{print $2}' | sed 's#refs/tags/##' | sort -V | tail -1)"
+  local essentials_tag_sha=""
+  if [[ -n "$essentials_latest_tag" ]]; then
+    essentials_tag_sha="$(git ls-remote --tags --refs "$(essentials_repo)" "refs/tags/${essentials_latest_tag}" | awk '{print $1}')"
+  fi
+
+  local status=0
+  echo
+  echo "Pinned starter kit:     ${starter_pin}"
+  echo "Remote main:            ${starter_remote}"
+  if [[ "$starter_pin" == "$starter_remote" ]]; then
+    ok "Starter kit: up to date with origin/main"
+  else
+    warn "Starter kit: origin/main has moved — re-run sync and fix patches if needed"
+    status=1
+  fi
+
+  echo
+  echo "Pinned Essentials:      $(essentials_ref) (${essentials_pin})"
+  echo "Remote main:            ${essentials_remote}"
+  echo "Latest tag:             ${essentials_latest_tag:-unknown} (${essentials_tag_sha:-unknown})"
+  if [[ -n "$essentials_tag_sha" && "$essentials_pin" == "$essentials_tag_sha" ]]; then
+    ok "Essentials: pin matches latest release tag (${essentials_latest_tag})"
+  elif [[ -n "$essentials_tag_sha" && "$essentials_pin" != "$essentials_tag_sha" ]]; then
+    warn "Essentials: a newer tag exists (${essentials_latest_tag}). Review docs/ESSENTIALS_MAPPING.md and update patches."
+    status=1
+  else
+    warn "Essentials: could not resolve latest tag SHA"
+    status=1
+  fi
+
+  # Detect meaningful main drift (configurables/stubs), ignoring chore-only commits.
+  if [[ -n "$essentials_remote" && "$essentials_pin" != "$essentials_remote" ]]; then
+    local ess_tmp="${CACHE_DIR}/essentials-compare"
+    rm -rf "$ess_tmp"
+    git clone --quiet "$(essentials_repo)" "$ess_tmp"
+    if ! git -C "$ess_tmp" diff --quiet "${essentials_pin}..${essentials_remote}" -- src config stubs; then
+      warn "Essentials: origin/main changed src/config/stubs vs pin — review mapping"
+      status=1
+    else
+      ok "Essentials: origin/main has no src/config/stubs changes vs pin (docs/CI-only drift OK)"
+    fi
+  fi
+
+  return "$status"
+}
+
+cmd_sync() {
+  ensure_git_apply
+  local remote_sha
+  remote_sha="$(git ls-remote "$(starter_repo)" refs/heads/main | awk '{print $1}')"
+  [[ -n "$remote_sha" ]] || { err "Unable to resolve upstream main"; exit 1; }
+
+  log "Sync: fetching starter kit main (${remote_sha}) ..."
+  fetch_starter "$remote_sha" >/dev/null
+
+  # Record attempted sync target
+  printf '%s\n' "$remote_sha" > "${CACHE_DIR}/last-sync-starter.sha"
+
+  if ! apply_patches "${CACHE_DIR}/starter"; then
+    err "Sync failed: patches did not apply to ${remote_sha}"
+    check_upstreams || true
+    exit 2
+  fi
+
+  ok "Sync apply succeeded against ${remote_sha}"
+  if check_upstreams; then
+    ok "Upstream pins are current."
+  else
+    warn "Patches applied, but upstream pins are behind — consider regenerating against new Essentials defaults."
+  fi
+}
+
+cmd_regenerate() {
+  ensure_git_apply
+  local dir=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --dir) dir="$2"; shift 2 ;;
+      *) err "Unknown argument: $1"; usage; exit 1 ;;
+    esac
+  done
+  [[ -n "$dir" ]] || { err "regenerate requires --dir <patched-tree>"; exit 1; }
+  dir="$(cd "$dir" && pwd)"
+
+  local pin
+  pin="$(starter_ref)"
+  log "Regenerating patches from ${dir} against pinned upstream ${pin} ..."
+
+  local base="${CACHE_DIR}/regenerate-base"
+  rm -rf "$base"
+  git clone "$(starter_repo)" "$base"
+  git -C "$base" checkout --force "$pin"
+  git -C "$base" reset --hard "$pin"
+
+  # Build a temporary git repo with base commit + patched tree for clean diffs
+  local work="${CACHE_DIR}/regenerate-work"
+  rm -rf "$work"
+  mkdir -p "$work"
+  # Copy base (tracked files only via rsync excluding VCS/deps)
+  rsync -a --delete \
+    --exclude '.git' \
+    --exclude 'vendor' \
+    --exclude 'node_modules' \
+    --exclude 'public/build' \
+    --exclude '.env' \
+    --exclude 'database/*.sqlite' \
+    --exclude 'storage/logs/*' \
+    --exclude 'storage/framework/cache/data/*' \
+    --exclude 'bootstrap/cache/*.php' \
+    --exclude 'composer.lock' \
+    --exclude 'package-lock.json' \
+    "${base}/" "${work}/"
+
+  git -C "$work" init -q
+  git -C "$work" add -A
+  git -C "$work" -c user.email=kit@local -c user.name=kit commit -q -m 'upstream base'
+
+  rsync -a --delete \
+    --exclude '.git' \
+    --exclude 'vendor' \
+    --exclude 'node_modules' \
+    --exclude 'public/build' \
+    --exclude '.env' \
+    --exclude 'database/*.sqlite' \
+    --exclude 'storage/logs/*' \
+    --exclude 'storage/framework/cache/data/*' \
+    --exclude 'bootstrap/cache/*.php' \
+    --exclude 'composer.lock' \
+    --exclude 'package-lock.json' \
+    "${dir}/" "${work}/"
+
+  git -C "$work" add -A
+
+  local runtime=(app/Providers/AppServiceProvider.php)
+  local tooling=(pint.json rector.php app/Console/Commands/MakeActionCommand.php stubs/action.stub)
+
+  mkdir -p "$PATCHES_DIR"
+  git -C "$work" diff --cached -- "${runtime[@]}" > "${PATCHES_DIR}/0001-essentials-runtime-defaults.patch"
+  git -C "$work" diff --cached -- "${tooling[@]}" > "${PATCHES_DIR}/0002-essentials-tooling-and-make-action.patch"
+
+  # Everything else that differs
+  mapfile -t all_files < <(git -C "$work" diff --cached --name-only)
+  local rest=()
+  local f
+  for f in "${all_files[@]}"; do
+    local skip=0
+    local x
+    for x in "${runtime[@]}" "${tooling[@]}"; do
+      if [[ "$f" == "$x" ]]; then skip=1; break; fi
+    done
+    if [[ "$skip" -eq 0 ]]; then
+      rest+=("$f")
+    fi
+  done
+
+  if [[ "${#rest[@]}" -gt 0 ]]; then
+    git -C "$work" diff --cached -- "${rest[@]}" > "${PATCHES_DIR}/0003-essentials-code-style-and-types.patch"
+  else
+    : > "${PATCHES_DIR}/0003-essentials-code-style-and-types.patch"
+  fi
+
+  cat > "$SERIES_FILE" <<EOF
+0001-essentials-runtime-defaults.patch
+0002-essentials-tooling-and-make-action.patch
+0003-essentials-code-style-and-types.patch
+EOF
+
+  ok "Wrote patch series:"
+  cat "$SERIES_FILE"
+  warn "Remember to update versions.json if you changed the upstream pin or Essentials mapping."
+}
+
+cmd_create() {
+  ensure_git_apply
+  local name="" force=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --force|-f) force=1; shift ;;
+      -*) err "Unknown option: $1"; exit 1 ;;
+      *) name="$1"; shift ;;
+    esac
+  done
+  [[ -n "$name" ]] || { err "create requires an application name"; usage; exit 1; }
+
+  local dest="${PWD}/${name}"
+  if [[ -e "$dest" ]]; then
+    if [[ "$force" -eq 1 ]]; then
+      warn "Removing existing ${dest}"
+      rm -rf "$dest"
+    else
+      err "Directory exists: ${dest} (pass --force to replace)"
+      exit 1
+    fi
+  fi
+
+  local pin
+  pin="$(starter_ref)"
+  log "Creating ${name} from laravel/react-starter-kit@${pin} + Essentials patches ..."
+
+  fetch_starter "$pin" >/dev/null
+  mkdir -p "$dest"
+  rsync -a --exclude '.git' "${CACHE_DIR}/starter/" "${dest}/"
+  # Fresh git optional — leave as plain tree; skill/agents may init separately
+  apply_patches "$dest"
+
+  # Drop kit cache metadata if any
+  rm -rf "${dest}/.cache" 2>/dev/null || true
+
+  ok "Created ${dest}"
+  cat <<EOF
+
+Next steps:
+  cd ${name}
+  composer install
+  cp .env.example .env && php artisan key:generate
+  # sqlite is already prepared by the starter's post-create scripts when using composer create-project;
+  # for this path:
+  touch database/database.sqlite && php artisan migrate
+  npm install && npm run build
+  php artisan test
+  vendor/bin/pint --test
+
+One-liner after create (from the new app directory):
+  composer install --no-interaction && cp -n .env.example .env && php artisan key:generate --force && mkdir -p database && touch database/database.sqlite && php artisan migrate --force && npm install && npm run build
+EOF
+}
+
+cmd_verify() {
+  local dir=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --dir) dir="$2"; shift 2 ;;
+      *) err "Unknown argument: $1"; exit 1 ;;
+    esac
+  done
+
+  if [[ -z "$dir" ]]; then
+    fetch_starter "$(starter_ref)" >/dev/null
+    dir="${CACHE_DIR}/starter"
+    # Reset to clean pin then apply
+    git -C "$dir" reset --hard "$(starter_ref)"
+    git -C "$dir" clean -fd
+  fi
+
+  apply_patches "$dir"
+  ok "Verify OK on ${dir}"
+  echo "Pinned starter:    $(starter_ref)"
+  echo "Pinned essentials: $(essentials_ref) ($(essentials_commit))"
+}
+
+cmd_versions() {
+  python3 - "$VERSIONS_FILE" <<'PY'
+import json, sys
+print(json.dumps(json.load(open(sys.argv[1])), indent=2))
+PY
+}
+
+main() {
+  local cmd="${1:-help}"
+  shift || true
+  case "$cmd" in
+    fetch)
+      local ref=""
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --ref) ref="$2"; shift 2 ;;
+          *) err "Unknown argument: $1"; exit 1 ;;
+        esac
+      done
+      fetch_starter "${ref:-$(starter_ref)}"
+      ;;
+    apply)
+      local dir=""
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --dir) dir="$2"; shift 2 ;;
+          *) err "Unknown argument: $1"; exit 1 ;;
+        esac
+      done
+      if [[ -z "$dir" ]]; then
+        fetch_starter "$(starter_ref)" >/dev/null
+        dir="${CACHE_DIR}/starter"
+      fi
+      apply_patches "$dir"
+      ;;
+    sync) cmd_sync "$@" ;;
+    check-upstreams) check_upstreams "$@" ;;
+    regenerate) cmd_regenerate "$@" ;;
+    create) cmd_create "$@" ;;
+    verify) cmd_verify "$@" ;;
+    versions) cmd_versions "$@" ;;
+    help|-h|--help) usage ;;
+    *) err "Unknown command: $cmd"; usage; exit 1 ;;
+  esac
+}
+
+main "$@"

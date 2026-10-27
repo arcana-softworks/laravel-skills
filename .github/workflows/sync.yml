@@ -1,0 +1,130 @@
+name: upstream-sync
+
+# Scheduled + on-demand check that Essentials patches still apply to the
+# official Laravel React starter kit, then run the app's lint/tests/build.
+# Compatible with GitHub Actions and Depot CI on Origin (GitHub Actions syntax).
+
+on:
+  schedule:
+    # Weekdays 06:15 UTC
+    - cron: '15 6 * * 1-5'
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: upstream-sync-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sync-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout kit repo
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mbstring, xml, curl, zip, sqlite3, bcmath, intl
+          coverage: none
+          tools: composer:v2
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Check upstream movement
+        id: upstreams
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          chmod +x bin/essentials-kit
+          if bin/essentials-kit check-upstreams; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::Upstream starter kit and/or Essentials have moved past the pinned refs in versions.json"
+          fi
+
+      - name: Fetch pinned starter kit and apply patches
+        run: |
+          set -euo pipefail
+          chmod +x bin/essentials-kit
+          bin/essentials-kit fetch
+          bin/essentials-kit apply --dir .cache/starter
+
+      - name: Also try applying against origin/main (early warning)
+        id: sync_main
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          # Clone a separate tree at origin/main and attempt apply without mutating the pinned verify tree
+          MAIN_SHA=$(git ls-remote https://github.com/laravel/react-starter-kit.git refs/heads/main | awk '{print $1}')
+          rm -rf .cache/starter-main
+          git clone --depth 1 https://github.com/laravel/react-starter-kit.git .cache/starter-main
+          git -C .cache/starter-main fetch --depth 1 origin "$MAIN_SHA"
+          git -C .cache/starter-main checkout --force "$MAIN_SHA"
+          if bin/essentials-kit apply --dir .cache/starter-main; then
+            echo "main_apply=ok" >> "$GITHUB_OUTPUT"
+          else
+            echo "main_apply=failed" >> "$GITHUB_OUTPUT"
+            echo "::error::Patches failed to apply cleanly against laravel/react-starter-kit main (${MAIN_SHA}). Regenerate patches."
+            exit 1
+          fi
+
+      - name: Install PHP dependencies
+        working-directory: .cache/starter
+        run: composer install --no-interaction --prefer-dist --no-scripts
+
+      - name: Discover packages and prepare app
+        working-directory: .cache/starter
+        run: |
+          set -euo pipefail
+          cp -n .env.example .env || true
+          php artisan package:discover --ansi
+          php artisan key:generate --force --ansi
+          mkdir -p database
+          test -f database/database.sqlite || touch database/database.sqlite
+          php artisan migrate --force --ansi
+
+      - name: Install JS dependencies and build
+        working-directory: .cache/starter
+        run: |
+          set -euo pipefail
+          npm install
+          npm run build
+
+      - name: Pint
+        working-directory: .cache/starter
+        run: vendor/bin/pint --parallel --test
+
+      - name: PHPStan
+        working-directory: .cache/starter
+        run: vendor/bin/phpstan analyse
+
+      - name: PHPUnit
+        working-directory: .cache/starter
+        run: php artisan test
+
+      - name: Summarize
+        if: always()
+        run: |
+          set -euo pipefail
+          echo "### Upstream sync" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Pinned starter: \`$(python3 -c 'import json;print(json.load(open("versions.json"))["starter_kit"]["ref"])')\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Pinned essentials: \`$(python3 -c 'import json;d=json.load(open("versions.json"));print(d["essentials"]["ref"], d["essentials"]["commit"])')\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Upstreams moved: \`${{ steps.upstreams.outputs.changed }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Apply on origin/main: \`${{ steps.sync_main.outputs.main_apply }}\`" >> "$GITHUB_STEP_SUMMARY"
+          if [[ "${{ steps.sync_main.outcome }}" == "failure" ]]; then
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "**Action needed:** patches no longer apply to upstream main. Fix with \`bin/essentials-kit regenerate --dir <working-tree>\`." >> "$GITHUB_STEP_SUMMARY"
+          fi

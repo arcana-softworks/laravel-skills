@@ -1,0 +1,10 @@
+.cache/
+.DS_Store
+*.sqlite
+.env
+vendor/
+node_modules/
+/tmp/
+*.log
+.idea/
+.vscode/
