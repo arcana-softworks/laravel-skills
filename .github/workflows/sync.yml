@@ -1,18 +1,20 @@
 name: upstream-sync
 
-# Scheduled + on-demand: keep patches applying to the official React starter kit,
-# verify lint/tests/build, and regenerate the materialized `kit` branch for
-# `laravel new --using=https://github.com/arcana-softworks/laravel-react#kit`.
+# Source-branch workflow (develop): verify patches and regenerate the default
+# branch `main` (installable app tree) for:
+#   laravel new my-app --using=https://github.com/arcana-softworks/laravel-react
+#
+# Schedule cannot run from develop (GitHub only schedules the default branch), so
+# a thin dispatcher lives on generated main — see templates/upstream-sync-schedule.yml
+# injected by bin/kit materialize. This file is also reusable via workflow_call.
 
 on:
-  schedule:
-    - cron: '15 6 * * 1-5'
   push:
-    # Only main — kit-branch pushes from materialize must not re-trigger this workflow.
-    branches: [main]
+    branches: [develop]
   pull_request:
-    branches: [main]
+    branches: [develop]
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: write
@@ -27,11 +29,12 @@ jobs:
     timeout-minutes: 45
 
     steps:
-      - name: Checkout kit repo
+      - name: Checkout source branch (develop)
         uses: actions/checkout@v4
         with:
+          ref: develop
           fetch-depth: 0
-          # Persist credentials so bin/kit materialize --push can force-push kit
+          # Persist credentials so bin/kit materialize --push can force-push main
           # with the workflow GITHUB_TOKEN (contents: write).
           persist-credentials: true
 
@@ -120,17 +123,18 @@ jobs:
         working-directory: .cache/starter
         run: php artisan test
 
-      - name: Materialize and push kit branch
-        # Never on PRs; only on main (push / schedule / dispatch). kit pushes do not match `on.push.branches: [main]`.
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+      - name: Materialize and push main (installable app)
+        # Never on PRs. Pushing generated main must not re-trigger this workflow
+        # (this workflow only listens to develop / workflow_call / dispatch).
+        if: github.event_name != 'pull_request'
         env:
           # Orphan materialize worktree does not inherit checkout credentials.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           KIT_PUSH_REMOTE: https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
         run: |
           set -euo pipefail
-          # Regenerates the orphan `kit` branch from patches (never hand-edited).
-          # Required for: laravel new my-app --using=https://github.com/arcana-softworks/laravel-react#kit
+          # Regenerates default branch `main` from patches (never hand-edited).
+          # Required for: laravel new my-app --using=https://github.com/arcana-softworks/laravel-react
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           bin/kit materialize --push
@@ -139,9 +143,11 @@ jobs:
         if: always()
         run: |
           set -euo pipefail
-          USING=$(python3 -c 'import json;d=json.load(open("versions.json"));print(d["kit"].get("using_url","https://github.com/arcana-softworks/laravel-react#kit"))')
+          USING=$(python3 -c 'import json;d=json.load(open("versions.json"));print(d["kit"].get("using_url","https://github.com/arcana-softworks/laravel-react"))')
           BR=$(python3 -c 'import json;print(json.load(open("versions.json"))["kit"]["branch"])')
+          SRC=$(python3 -c 'import json;print(json.load(open("versions.json"))["kit"].get("source_branch","develop"))')
           echo "### Upstream sync" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Source branch: \`${SRC}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- Pinned starter: \`$(python3 -c 'import json;print(json.load(open("versions.json"))["starter_kit"]["ref"])')\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- Pinned essentials: \`$(python3 -c 'import json;d=json.load(open("versions.json"));print(d["essentials"]["ref"], d["essentials"]["commit"])')\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- Upstreams moved: \`${{ steps.upstreams.outputs.changed }}\`" >> "$GITHUB_STEP_SUMMARY"

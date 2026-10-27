@@ -43,10 +43,10 @@ As of the pinned starter SHA, the upstream kit already configured immutable date
 
 ## Installable tree
 
-`bin/kit materialize --push` applies this mapping onto the pinned starter and force-pushes orphan branch `kit`. Consumers install with:
+`bin/kit materialize --push` (from **`develop`**) applies this mapping onto the pinned starter and force-pushes default branch **`main`**. Consumers install with:
 
 ```bash
-laravel new my-app --using=https://github.com/arcana-softworks/laravel-react#kit
+laravel new my-app --using=https://github.com/arcana-softworks/laravel-react
 ```
 
-(Optional Packagist later: `kit.composer_name` → `dev-kit`.) Do not hand-edit branch `kit`.
+(Optional Packagist later: `kit.composer_name` → `dev-main`.) Do not hand-edit branch `main`.

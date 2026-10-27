@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # kit — maintain source patches against laravel/react-starter-kit that encode
 # Nuno Maduro Essentials recommendations (without requiring nunomaduro/essentials),
-# materialize a full-app `kit` branch for `laravel new --using=…`, and create apps.
+# materialize the installable default branch (main) for `laravel new --using=…`,
+# and create apps. Source of truth lives on develop.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -46,7 +47,11 @@ essentials_repo() { json_get "$VERSIONS_FILE" 'data["essentials"]["repository"]'
 essentials_ref()  { json_get "$VERSIONS_FILE" 'data["essentials"]["ref"]'; }
 essentials_commit() { json_get "$VERSIONS_FILE" 'data["essentials"]["commit"]'; }
 kit_branch() { json_get "$VERSIONS_FILE" 'data["kit"]["branch"]'; }
+kit_source_branch() { json_get "$VERSIONS_FILE" 'data["kit"].get("source_branch", "develop")'; }
 kit_composer_name() { json_get "$VERSIONS_FILE" 'data["kit"]["composer_name"]'; }
+kit_using_url() {
+  json_get "$VERSIONS_FILE" 'data["kit"].get("using_url", "https://github.com/arcana-softworks/laravel-react")'
+}
 
 usage() {
   cat <<EOF
@@ -58,19 +63,21 @@ Commands:
   sync                             Fetch latest upstream main, apply patches, report status
   check-upstreams                  Report whether starter-kit / Essentials moved past pinned refs
   regenerate --dir <patched-tree>  Rebuild patches/* from a working tree vs the pinned upstream
-  materialize [--push] [--dir <p>] Build the full-app tree for laravel new --using (kit branch)
+  materialize [--push] [--dir <p>] Build the installable app tree (default branch main)
   create <name> [--force]          One-command: fetch pinned upstream, apply patches, write ./<name>
   verify [--dir <path>]            Apply to a temp (or given) tree and print a summary
   versions                         Show pinned upstream / kit package metadata
   help                             Show this help
 
 Environment:
-  KIT_CACHE   Override cache directory (default: <repo>/.cache)
+  KIT_CACHE        Override cache directory (default: <repo>/.cache)
+  KIT_PUSH_REMOTE  Override git remote URL used by materialize --push
+  GITHUB_TOKEN     When set, embed as https push credentials for GitHub
 
 laravel new --using:
-  After materialize --push, consumers use the public kit branch (tiged):
+  After materialize --push, consumers use the default branch (tiged, no #ref):
 
-    laravel new my-app --using=https://github.com/arcana-softworks/laravel-react#kit
+    laravel new my-app --using=https://github.com/arcana-softworks/laravel-react
 
   See README for the bin/kit create alternative and optional Packagist.
 
@@ -235,6 +242,11 @@ materialize_tree() {
   rsync -a --exclude '.git' "${CACHE_DIR}/starter/" "${dest}/"
   rewrite_kit_composer_json "$dest" "$pkg" "$pin" "$(essentials_ref)"
 
+  # Inject schedule dispatcher onto the generated default branch so GitHub can
+  # run cron (schedules only fire from the default branch). Gate + export-ignore
+  # keep it out of consumer apps when tiged uses GitHub's archive tarball.
+  inject_schedule_workflow "$dest"
+
   # Marker so consumers/CI can tell this tree is generated
   cat > "${dest}/.kit-generated" <<EOF
 generated_by=bin/kit materialize
@@ -243,6 +255,7 @@ essentials_ref=$(essentials_ref)
 essentials_commit=$(essentials_commit)
 composer_name=${pkg}
 kit_branch=$(kit_branch)
+source_branch=$(kit_source_branch)
 do_not_hand_edit=1
 EOF
 
@@ -250,6 +263,25 @@ EOF
   # Path is also written for callers that cannot capture mixed log+path stdout.
   printf '%s' "$dest" > "${CACHE_DIR}/last-materialized.path"
   printf '%s\n' "$dest"
+}
+
+inject_schedule_workflow() {
+  local dest="$1"
+  local template="${ROOT}/templates/upstream-sync-schedule.yml"
+  local wf_dir="${dest}/.github/workflows"
+  local wf_name="upstream-sync-schedule.yml"
+  [[ -f "$template" ]] || { err "Missing schedule template: $template"; exit 1; }
+  mkdir -p "$wf_dir"
+  cp "$template" "${wf_dir}/${wf_name}"
+
+  local ga="${dest}/.gitattributes"
+  if [[ -f "$ga" ]]; then
+    if ! grep -Fq ".github/workflows/${wf_name} export-ignore" "$ga"; then
+      printf '\n# Kit-repo schedule dispatcher only (not for generated apps)\n.github/workflows/%s export-ignore\n' "$wf_name" >> "$ga"
+    fi
+  else
+    printf '# Kit-repo schedule dispatcher only (not for generated apps)\n.github/workflows/%s export-ignore\n' "$wf_name" > "$ga"
+  fi
 }
 
 push_kit_branch() {
@@ -278,7 +310,7 @@ push_kit_branch() {
     remote_url="$(printf '%s' "$remote_url" | sed -E 's#https://([^@]+@)?github.com/#https://x-access-token:'"${GITHUB_TOKEN}"'@github.com/#')"
   fi
 
-  log "Publishing orphan branch '${branch}' to origin (generated tree only) ..."
+  log "Publishing generated branch '${branch}' to origin (installable app tree only) ..."
   rm -rf "$work"
   mkdir -p "$work"
   rsync -a --exclude '.git' "${src}/" "${work}/"
@@ -293,9 +325,11 @@ push_kit_branch() {
     commit -q -m "materialize ${pkg} from react-starter-kit@${starter_sha:0:12} + Essentials ${essentials_sha:0:12} patches"
 
   git -C "$work" remote add origin "$remote_url"
+  # Force-push is intentional: main is generated output, never merged by hand.
   git -C "$work" push -u --force origin "HEAD:refs/heads/${branch}"
   ok "Pushed origin/${branch}"
   ok "Composer version for this branch: dev-${branch}"
+  ok "Install: laravel new my-app --using=$(kit_using_url)"
 }
 
 check_upstreams() {
@@ -564,8 +598,8 @@ Next steps:
   composer install --no-interaction --prefer-dist
   # Prefer laravel new --using=… for full installer/Chisel hook behaviour.
 
-  Or use the materialized kit branch (tiged):
-    laravel new ${name} --using=https://github.com/arcana-softworks/laravel-react#kit
+  Or use the public default branch (tiged):
+    laravel new ${name} --using=$(kit_using_url)
 EOF
 }
 
@@ -589,7 +623,8 @@ cmd_verify() {
   ok "Verify OK on ${dir}"
   echo "Pinned starter:    $(starter_ref)"
   echo "Pinned essentials: $(essentials_ref) ($(essentials_commit))"
-  echo "Kit using URL:     https://github.com/arcana-softworks/laravel-react/tree/$(kit_branch)"
+  echo "Kit using URL:     $(kit_using_url)"
+  echo "Generated branch:  $(kit_branch) (source: $(kit_source_branch))"
   echo "Kit package (opt): $(kit_composer_name) (branch $(kit_branch) => dev-$(kit_branch))"
 }
 

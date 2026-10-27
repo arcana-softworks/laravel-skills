@@ -1,0 +1,24 @@
+name: upstream-sync-schedule
+
+# Injected onto default branch `main` (generated app) so GitHub can run `schedule`
+# (schedules only fire from the default branch). Not meant for apps created from
+# this tree: gated to arcana-softworks/laravel-react, and listed in .gitattributes
+# export-ignore so tiged/laravel-new tarballs omit it when export-ignore is honored.
+
+on:
+  schedule:
+    - cron: '15 6 * * 1-5'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: upstream-sync-schedule
+  cancel-in-progress: true
+
+jobs:
+  sync-from-develop:
+    if: github.repository == 'arcana-softworks/laravel-react'
+    uses: arcana-softworks/laravel-react/.github/workflows/sync.yml@develop
+    secrets: inherit

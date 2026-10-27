@@ -5,26 +5,29 @@ Start from the **official** [Laravel Inertia React starter kit](https://github.c
 ## Create an app
 
 ```bash
-laravel new my-app --using=https://github.com/arcana-softworks/laravel-react#kit
+laravel new my-app --using=https://github.com/arcana-softworks/laravel-react
 ```
 
-The Laravel installer uses [tiged](https://github.com/tiged/tiged) under the hood for URL-shaped `--using` values (`npx tiged@latest … && composer install`). Equivalent shorthand: `arcana-softworks/laravel-react#kit`.
+The Laravel installer uses [tiged](https://github.com/tiged/tiged) under the hood for URL-shaped `--using` values (`npx tiged@latest … && composer install`). That clones the repo **default branch** (`main`), which is the generated full app.
 
-> **Note:** Use `#kit` (tiged’s branch/ref syntax). GitHub’s browse URL `/tree/kit` is **not** understood by tiged — it treats `/tree/kit` as a subdirectory and clones `HEAD` instead.
-
-Alternative (from a clone of this repo, no installer):
+Alternative (from a clone of the **`develop`** source branch):
 
 ```bash
+git clone -b develop https://github.com/arcana-softworks/laravel-react.git
+cd laravel-react
 ./bin/kit create my-app
 ```
 
-Optional future route: publish branch `kit` to [Packagist](https://packagist.org) (set `kit.composer_name` in `versions.json`, rematerialize, then `laravel new my-app --using=your-vendor/your-package:dev-kit`).
+Optional future route: publish to [Packagist](https://packagist.org) (set `kit.composer_name` in `versions.json`, rematerialize, then `laravel new my-app --using=your-vendor/your-package:dev-main`).
 
-This repo is the single source of truth for:
+## Branch layout
 
-1. **Patches + tooling** — `patches/`, `bin/kit`, scheduled CI sync  
-2. **Materialized installable kit** — orphan branch `kit` (generated only; never hand-edited) for `laravel new --using=…`  
-3. **Agent skill** — `skills/laravel-react-essentials/SKILL.md` (uses the same patches/`bin/kit`)
+| Branch | Role |
+|--------|------|
+| **`main`** (default) | Generated installable Laravel + React app. **Never hand-edit.** Produced by `bin/kit materialize --push`. |
+| **`develop`** | Source of truth: `patches/`, `bin/kit`, `versions.json`, docs, skills, CI. |
+
+You are reading the maintainer README on **`develop`**. The GitHub home page (`main`) shows the generated app’s upstream starter README — switch to the `develop` branch for this document and the agent skill.
 
 ## Pinned upstreams
 
@@ -34,9 +37,15 @@ See [`versions.json`](versions.json). Current patch set built against:
 |---------|-----|
 | `laravel/react-starter-kit` | `dbd4817d2d2936be14bc1ca7c94692fcef20b6b1` |
 | `nunomaduro/essentials` | `v1.2.0` (`c5458ca…`) |
-| Materialized kit branch | `kit` (tiged / optional Packagist `dev-kit`) |
+| Materialized app branch | `main` (default / tiged HEAD) |
 
 Feature → file mapping: [`docs/ESSENTIALS_MAPPING.md`](docs/ESSENTIALS_MAPPING.md).
+
+This repo is the single source of truth for:
+
+1. **Patches + tooling** — `patches/`, `bin/kit`, CI sync on `develop`
+2. **Materialized installable app** — default branch `main` (generated only) for `laravel new --using=…`
+3. **Agent skill** — `skills/laravel-react-essentials/SKILL.md`
 
 ## How `laravel new --using` works
 
@@ -47,11 +56,11 @@ From `laravel/installer` v5:
 | **Contains `://`** (and not a first-party `laravel/*` kit) | `npx tiged@latest {using} "{dir}" && composer install` |
 | **No `://`** (Packagist / Composer package) | `composer create-project {using} "{dir}" --stability=dev` |
 
-Branch `kit` is an **orphan full-app tree** produced by `bin/kit materialize --push` from `patches/` + the pinned upstream. Patches remain the source of truth; never edit `kit` by hand.
+No branch suffix is required: tiged clones the default branch. Patches remain the source of truth on `develop`; never edit `main` by hand.
 
 ### Chisel / `install:features`
 
-The official starter runs `install:features` from Composer / installer hooks. The Laravel installer sets `LARAVEL_INSTALLER_DEFER_HOOKS=1` during `create-project`, then runs deferred hooks afterward (so Chisel is not half-applied mid-install). Prefer **`laravel new --using=…`** over raw `composer install` when you want that behaviour. Materialize **does not** run Composer or Chisel; it only writes the source tree.
+The official starter runs `install:features` from Composer / installer hooks. The Laravel installer sets `LARAVEL_INSTALLER_DEFER_HOOKS=1` during `create-project`, then runs deferred hooks afterward. Prefer **`laravel new --using=…`** over raw `composer install` when you want that behaviour. Materialize **does not** run Composer or Chisel; it only writes the source tree.
 
 ## Local one-command (without the installer)
 
@@ -76,7 +85,7 @@ npm install && npm run build
 ./bin/kit check-upstreams
 ./bin/kit regenerate --dir <patched-app>
 ./bin/kit materialize          # build .cache/materialized
-./bin/kit materialize --push   # build + force-push orphan branch kit
+./bin/kit materialize --push   # build + force-push generated branch main
 ./bin/kit create my-app
 ./bin/kit verify
 ```
@@ -99,32 +108,33 @@ Code style: Essentials Pint rules across the skeleton.
 
 **Not** applied: `Unguard` (disabled in Essentials by default). **Not** added: `nunomaduro/essentials` package.
 
-## Agent skill (two commits)
+## Agent skill
 
-Follow [`skills/laravel-react-essentials/SKILL.md`](skills/laravel-react-essentials/SKILL.md). Prefer `laravel new --using=…` when the `kit` branch is available; otherwise scaffold + `bin/kit apply` with exactly two commits.
+Follow [`skills/laravel-react-essentials/SKILL.md`](skills/laravel-react-essentials/SKILL.md). Prefer `laravel new --using=…` against default `main`; otherwise scaffold + `bin/kit apply` with exactly two commits.
 
 ## CI sync
 
-[`.github/workflows/sync.yml`](.github/workflows/sync.yml) runs on a weekday schedule, push to `main`, and manual `workflow_dispatch`:
+| Workflow | Lives on | Triggers |
+|----------|----------|----------|
+| [`.github/workflows/sync.yml`](.github/workflows/sync.yml) | `develop` | push / PR to `develop`, `workflow_dispatch`, and `workflow_call` |
+| `upstream-sync-schedule.yml` (injected) | generated `main` | weekday `schedule` + `workflow_dispatch` only |
 
-1. `check-upstreams` (starter kit + Essentials past pinned refs)
-2. Apply patches to the pinned starter and current upstream `main`
-3. Pint / PHPStan / PHPUnit / `npm run build`
-4. On `main` (not PRs): `bin/kit materialize --push` via `GITHUB_TOKEN` (`contents: write`)
+The schedule file must sit on the **default branch** (GitHub only runs cron there). Materialize injects a thin dispatcher that calls the reusable `sync.yml` on `develop`, gated to `arcana-softworks/laravel-react`, and marks it `export-ignore` so tiged tarballs omit it when GitHub honors export-ignore. Pushing regenerated `main` does not re-run the develop workflow (no `on.push` for `main`).
 
-Triggers are limited to `main` (and schedule / dispatch) so regenerating `kit` does not re-run the workflow. No app secrets are stored in this public repo.
+Needs `contents: write` to force-push `main`. No app secrets are stored in this public repo.
 
-## Layout
+## Layout (`develop`)
 
 ```
 bin/kit
 patches/series
 patches/0001-….patch …
 versions.json
+templates/upstream-sync-schedule.yml
 docs/ESSENTIALS_MAPPING.md
 skills/laravel-react-essentials/SKILL.md
 .github/workflows/sync.yml
-# branch kit  → generated full app only (not present on main)
+# branch main → generated full app only (not present on develop)
 ```
 
 ## License

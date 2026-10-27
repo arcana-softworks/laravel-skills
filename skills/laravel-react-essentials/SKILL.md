@@ -3,51 +3,49 @@ name: laravel-react-essentials
 description: >-
   Create a fresh Laravel Inertia React app from the official laravel/react-starter-kit
   with Nuno Maduro Essentials recommendations as source patches (not the composer
-  package). Prefer laravel new --using against this repo's generated kit branch; otherwise
-  apply patches via bin/kit and leave exactly two commits (scaffold, then patches).
+  package). Prefer laravel new --using against this repo's generated default branch;
+  otherwise apply patches via bin/kit and leave exactly two commits (scaffold, then patches).
 ---
 
 # Laravel React + Essentials (patch-based)
 
 Do **not** add `nunomaduro/essentials` to Composer.
 
-Shared source of truth:
+Shared source of truth (branch **`develop`**):
 
 | Path | Role |
 |------|------|
-| `bin/kit` | Fetch upstream, apply/regenerate patches, materialize `kit` branch, create apps |
+| `bin/kit` | Fetch upstream, apply/regenerate patches, materialize `main`, create apps |
 | `patches/` + `patches/series` | Ordered patch set |
-| `versions.json` | Pinned starter-kit + Essentials refs + `kit.composer_name` / `kit.branch` |
+| `versions.json` | Pinned starter-kit + Essentials refs + `kit.branch` / `kit.source_branch` |
 | `docs/ESSENTIALS_MAPPING.md` | Feature → source mapping |
-| Branch `kit` | Generated full-app tree for `laravel new --using` (never hand-edit) |
+| Branch `main` | Generated full-app tree (default branch; never hand-edit) |
 
 ## Preferred: `laravel new --using`
 
-Public GitHub kit branch (tiged under the hood):
+Public default branch (tiged under the hood — no `#ref` needed):
 
 ```bash
-laravel new my-app --using=https://github.com/arcana-softworks/laravel-react#kit
-# shorthand: arcana-softworks/laravel-react#kit
-# Do not use /tree/kit — tiged treats that as a subdirectory, not a branch.
+laravel new my-app --using=https://github.com/arcana-softworks/laravel-react
 ```
 
-Alternative from a clone of this repo:
+Alternative from a `develop` clone:
 
 ```bash
 ./bin/kit create my-app
 ```
 
-Optional later: Packagist after you publish `kit.composer_name` from `versions.json` (`laravel new my-app --using=your-vendor/your-package:dev-kit`).
+Optional later: Packagist after you publish `kit.composer_name` from `versions.json` (`laravel new my-app --using=your-vendor/your-package:dev-main`).
 
 After `laravel new`, verify with Pint / PHPStan / `php artisan test` / `npm run build` as needed. Confirm Essentials behaviours (strict models, immutable dates, etc.) and that `composer.json` does **not** require `nunomaduro/essentials`.
 
 ## Fallback: two-commit patch apply
 
-Use when the `kit` branch is unavailable. Prefer a scratch directory outside the kit repo.
+Use when the generated `main` branch is unavailable. Prefer a scratch directory outside the kit repo.
 
 ```bash
 set -euo pipefail
-KIT_ROOT="/path/to/this-kit-repo"
+KIT_ROOT="/path/to/this-kit-repo"   # develop checkout
 APP_NAME="my-app"
 APP_PARENT="${PWD}"
 APP_DIR="${APP_PARENT}/${APP_NAME}"
@@ -105,8 +103,8 @@ php artisan test
 ## Rules
 
 - **Never** `composer require nunomaduro/essentials`.
-- **Never** paste or re-implement patch hunks; always call `bin/kit apply` or `laravel new --using=…` against the materialized `kit` branch.
-- **Never** hand-edit branch `kit`; regenerate with `bin/kit materialize --push`.
+- **Never** paste or re-implement patch hunks; always call `bin/kit apply` or `laravel new --using=…` against generated `main`.
+- **Never** hand-edit branch `main`; regenerate with `bin/kit materialize --push` from `develop`.
 - If apply fails, stop and report the failing patch + `git apply` error; fix via `bin/kit regenerate --dir ...`.
 - Do not invent features beyond `docs/ESSENTIALS_MAPPING.md` / the patch set.
 
