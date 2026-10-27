@@ -279,7 +279,9 @@ PY
   LINT_CMD="vp lint"
   # Type-check only via vp check (requires lint.options.typeCheck).
   TYPES_CMD="vp check --no-fmt --no-lint"
-  TEST_CMD="vp test"
+  # laravel-vite-plugin refuses to load vite.config under CI=true (thinks HMR).
+  # Vitest still needs that config — bypass is the documented escape hatch.
+  TEST_CMD="LARAVEL_BYPASS_ENV_CHECK=1 vp test"
   # Keep build on vp when the kit already uses it; ensure script exists.
   BUILD_CMD="vp build"
 
@@ -368,6 +370,10 @@ PY
   LINT_CMD="oxlint"
   TYPES_CMD="oxlint --type-aware --type-check"
   TEST_CMD="vitest run"
+  # Same CI guard when laravel-vite-plugin is present without vite-plus.
+  if has_dep "laravel-vite-plugin"; then
+    TEST_CMD="LARAVEL_BYPASS_ENV_CHECK=1 vitest run"
+  fi
   BUILD_CMD=""
 fi
 

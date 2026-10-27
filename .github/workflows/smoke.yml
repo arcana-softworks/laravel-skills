@@ -73,7 +73,7 @@ jobs:
           grep -q '"format:check": "vp fmt --check"' package.json
           grep -q '"lint": "vp lint"' package.json
           grep -q '"types": "vp check --no-fmt --no-lint"' package.json
-          grep -q '"test:js": "vp test"' package.json
+          grep -q '"test:js": "LARAVEL_BYPASS_ENV_CHECK=1 vp test"' package.json
           ! grep -E '"oxfmt"|"oxlint"|"oxlint-tsgolint"|"jest"|@swc/jest|jest-environment-jsdom|"@types/jest"' package.json
           test ! -e .oxfmtrc.json
           test ! -e .oxlintrc.json

@@ -102,7 +102,7 @@ JS standard — **prefer vite-plus** on React/Vue/Svelte kits (config in `vite.c
 | Format | `format` / `format:check` | `vp fmt` / `vp fmt --check` | `oxfmt` / `oxfmt --check` |
 | Lint | `lint` | `vp lint` (type-aware via config) | `oxlint` |
 | Types | `types` | `vp check --no-fmt --no-lint` | `oxlint --type-aware --type-check` |
-| JS tests | `test:js` | `vp test` | `vitest run` |
+| JS tests | `test:js` | `LARAVEL_BYPASS_ENV_CHECK=1 vp test` | `vitest run` (same env prefix if `laravel-vite-plugin` is present) |
 | Build | `build` | `vp build` | kit default |
 
 ### 4) Summarize for the user
