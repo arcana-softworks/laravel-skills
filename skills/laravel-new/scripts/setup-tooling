@@ -41,6 +41,8 @@ raise SystemExit(0 if pkg in req else 1)
 PY
 }
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # ---------- Composer / NPM install ----------
 log "Installing Composer dependencies..."
 composer install --no-interaction --prefer-dist
@@ -126,6 +128,13 @@ else
   warn "Skipping Wayfinder (--skip-wayfinder)"
 fi
 
+# ---------- JS: oxfmt + oxlint (type-aware) + Jest ----------
+if [[ -f package.json ]]; then
+  log "Configuring oxfmt / oxlint / Jest..."
+  chmod +x "${SCRIPT_DIR}/setup-js-tooling"
+  "${SCRIPT_DIR}/setup-js-tooling" --dir "$APP_DIR"
+fi
+
 # ---------- Env / key / sqlite / migrate / build / test ----------
 if [[ -f .env.example && ! -f .env ]]; then
   cp .env.example .env
@@ -142,10 +151,16 @@ php artisan migrate --force --no-interaction || warn "migrate failed or no migra
 if [[ -f package.json ]]; then
   log "Building frontend assets..."
   npm run build || warn "npm run build failed"
+
+  log "JS format:check / lint / types / test:js..."
+  npm run format:check || warn "format:check failed"
+  npm run lint || warn "lint failed"
+  npm run types || warn "types (oxlint --type-aware --type-check) failed"
+  npm run test:js || warn "test:js failed"
 fi
 
-log "Running test suite..."
-php artisan test || warn "tests failed"
+log "Running PHP test suite..."
+php artisan test || warn "PHP tests failed"
 
 if [[ -x vendor/bin/pint ]]; then
   log "Running Pint (--test)..."

@@ -2,127 +2,97 @@
 name: laravel-new
 description: >-
   Create a new Laravel application with any official or community starter kit
-  (Inertia React default), apply Nuno Maduro Essentials as source-level changes
-  (not the composer package) in one atomic commit, then set up Laravel Boost and
-  Wayfinder when appropriate. Use when the user asks for a new Laravel app,
-  laravel new, scaffold Laravel, or wants Essentials defaults without
-  nunomaduro/essentials.
+  (Inertia React default), apply sensible Laravel source defaults in one atomic
+  commit, then set up Boost, Wayfinder when needed, and JS tooling (oxfmt,
+  oxlint type-aware, Jest). Use when the user asks for a new Laravel app,
+  laravel new, or scaffold Laravel.
 ---
 
 # laravel-new
 
-Create a fresh Laravel app, apply Essentials as **source**, then add Boost / Wayfinder tooling. Never `composer require nunomaduro/essentials`.
+Create a fresh Laravel app → apply sensible source defaults → Boost / Wayfinder / oxfmt+oxlint+Jest.
 
-Install this skill: `npx skills add arcana-softworks/laravel-new-skill` (optionally `--skill laravel-new -g -a cursor -a claude-code -a codex -y`).
-
-Skill root (this directory): use `${SKILL_ROOT}` below as the installed skill path (e.g. `.agents/skills/laravel-new` or `.cursor/skills/laravel-new`).
+Install: `npx skills add arcana-softworks/laravel-new-skill` (optionally `--skill laravel-new -g -a cursor -a claude-code -a codex -y`).
 
 ```bash
-SKILL_ROOT="$(dirname "$(dirname "$0")")"  # when running a script from scripts/
-# or absolute path to this skill directory after install
+SKILL_ROOT="…/skills/laravel-new"   # path after install
 ```
-
-## When the user asks
-
-Triggers include: “new Laravel app”, “scaffold Laravel”, “laravel new”, “Laravel with Essentials”, “Inertia React app”, etc.
 
 ## Ask only what is needed
 
-Collect (or infer from the request), then proceed with defaults:
-
 | Prompt | Default |
 |--------|---------|
-| App name | required (ask if missing) |
+| App name | required |
 | Starter kit | **Inertia React** (`--react`) |
 | Database | `sqlite` |
-| Test framework | `phpunit` |
-| Auth extras | none (`--workos` / `--teams` / `--no-authentication` only if requested) |
-| Agents for Boost | `cursor,claude_code,codex` (or whatever the user names) |
+| Tests (PHP) | `phpunit` |
+| Boost agents | `cursor,claude_code,codex` |
 
-### Kit choices (Laravel installer)
+Kits: `--react` / `--vue` / `--svelte` / `--livewire` / none / `--using=<package-or-url>`.
 
-| User intent | Flag / value |
-|-------------|--------------|
-| React + Inertia (default) | `--react` |
-| Vue + Inertia | `--vue` |
-| Svelte + Inertia | `--svelte` |
-| Livewire | `--livewire` |
-| No starter kit | omit kit flags → plain `laravel/laravel` via fallback, or installer without kit flags |
-| Community / custom | `--using=<packagist/name-or-https-url>` |
+## Commit layout (mandatory)
 
-Installer also supports `--livewire-class-components`, `--workos`, `--teams`, `--no-authentication`, `--pest` / `--phpunit`, `--npm` / `--no-node`, `--boost` / `--no-boost`. Prefer this skill’s Boost step over the installer’s `--boost` so Boost lands in the tooling commit.
+1. **Scaffold** — untouched kit  
+2. **Essentials** — sensible PHP defaults only (one atomic commit)  
+3. **Tooling** — Boost, Wayfinder (if needed), oxfmt/oxlint/Jest, deps, build, tests  
 
-## Procedure (mandatory commit layout)
-
-Work in a clean parent directory. Prefer the helper scripts shipped with this skill; they are idempotent where noted.
-
-### 1) Scaffold (commit 1 — untouched kit)
+### 1) Scaffold
 
 ```bash
 chmod +x "${SKILL_ROOT}/scripts/"*
 "${SKILL_ROOT}/scripts/scaffold-app" my-app --kit react --database sqlite --phpunit
 cd my-app
-# If the directory is not already a git repo:
 git init -b main
 git add -A
 git commit -m "Scaffold Laravel application (official react starter kit)"
 ```
 
-Adjust the commit message to name the kit actually used (`vue`, `livewire`, `using:vendor/package`, etc.).
+### 2) Essentials (source defaults)
 
-Fallback if `laravel` is not on `PATH`: `scaffold-app` uses `composer create-project` for Packagist kit names (not URL-shaped `--using` values).
-
-### 2) Essentials as source (commit 2 — one atomic commit)
+Paste/apply the snippets in [`reference/ESSENTIALS.md`](reference/ESSENTIALS.md), or run:
 
 ```bash
-# Optional but recommended: review live Essentials docs first
-# https://raw.githubusercontent.com/nunomaduro/essentials/main/README.md
-
 "${SKILL_ROOT}/scripts/apply-essentials" --dir .
-# Verify behaviours / quality gates when present:
-vendor/bin/pint --parallel --test 2>/dev/null || true
-vendor/bin/phpstan analyse 2>/dev/null || true
-php artisan test 2>/dev/null || true
+vendor/bin/pint --parallel --test
+php artisan test
 php artisan make:action SkillProbe --no-interaction && rm -f app/Actions/SkillProbeAction.php
-
 git add -A
-git commit -m "Apply Nuno Maduro Essentials recommendations as source (not nunomaduro/essentials)"
+git commit -m "Apply sensible Laravel defaults (strict models, immutable dates, make:action, Pint)"
 ```
 
-Confirm `composer.json` does **not** list `nunomaduro/essentials`.
+Key paste targets (see reference for full blocks):
 
-If `apply-essentials` warns about new upstream headings, read the Essentials README and extend the provider / stubs before committing.
+| Where | What |
+|-------|------|
+| `app/Providers/EssentialsServiceProvider.php` | `Model::shouldBeStrict()`, eager load, `Date::use(CarbonImmutable::class)`, prohibit destructive commands, `URL::forceHttps` in production, `Vite::usePrefetchStrategy('aggressive')`, password defaults, `Http::preventStrayRequests` + `Sleep::fake` in unit tests |
+| `bootstrap/providers.php` | Register that provider |
+| `app/Console/Commands/MakeActionCommand.php` + `stubs/action.stub` | From `reference/stubs/` |
+| `pint.json` / optional `rector.php` | From `reference/stubs/` |
 
-Reference: [`reference/ESSENTIALS.md`](reference/ESSENTIALS.md).
-
-### 3) Tooling: Boost + Wayfinder + deps (commit 3+)
+### 3) Tooling (Boost + Wayfinder + JS)
 
 ```bash
 "${SKILL_ROOT}/scripts/setup-tooling" --dir . --agents cursor,claude_code,codex
 git add -A
-git commit -m "Install Laravel Boost, Wayfinder (if needed), and project tooling"
+git commit -m "Install Boost, Wayfinder (if needed), oxfmt/oxlint/Jest, and project tooling"
 ```
 
-- **Boost:** `composer require --dev laravel/boost`, write `boost.json` with agents, then `php artisan boost:install --no-interaction`.
-- **Wayfinder:** if the kit already has `laravel/wayfinder`, leave it. Otherwise, on Inertia + Vite stacks, install `laravel/wayfinder` + `@laravel/vite-plugin-wayfinder` and wire `vite.config.*`.
-- Also: `composer install`, `npm install`, `key:generate`, sqlite migrate, `npm run build`, `php artisan test`.
+JS standard (replaces Prettier/ESLint / `vp check` format scripts):
 
-Keep Essentials changes out of this commit.
+| Tool | Scripts |
+|------|---------|
+| **oxfmt** | `format`, `format:check` |
+| **oxlint** + **oxlint-tsgolint** | `lint`, `types` (`oxlint --type-aware --type-check`) |
+| **Jest** (+ `@swc/jest`, jsdom; React: Testing Library) | `test:js` — separate from Pest/PHPUnit |
 
-### 4) Final summary to the user
+Do **not** use Vitest as the app JS test runner. Vue/Svelte: same Jest pipeline; use `@vue/test-utils` / `@testing-library/svelte` as noted by `setup-js-tooling`.
 
-Report:
+### 4) Summarize for the user
 
-1. App path and kit used  
-2. Commit layout (scaffold → Essentials → tooling)  
-3. Essentials behaviours present; package **not** required  
-4. Boost agents configured; Wayfinder status  
-5. Test / Pint / PHPStan results  
+App path, kit, three commits, PHP defaults present, Boost/Wayfinder/JS tooling status, PHP + `test:js` / format / lint / types / build results.
 
 ## Rules
 
-- **Never** `composer require nunomaduro/essentials`.
-- **Never** squash Essentials into the scaffold commit.
-- Prefer scripts under `scripts/` over re-implementing patch hunks.
-- Kits differ — do not assume React-only file paths; the Essentials provider approach is kit-agnostic.
-- Re-fetch Essentials docs when applying so new defaults are not missed silently.
+- Never squash essentials into the scaffold commit.
+- Prefer skill scripts + `reference/ESSENTIALS.md` snippets over inventing config.
+- Keep PHP tests (`php artisan test`) and JS tests (`npm run test:js`) separate.

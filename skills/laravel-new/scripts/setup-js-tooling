@@ -1,0 +1,196 @@
+#!/usr/bin/env bash
+# setup-js-tooling — replace Prettier/ESLint (or vp check) with oxfmt + oxlint
+# (type-aware via oxlint-tsgolint) and add Jest (not Vitest) for JS/TS tests.
+#
+# Usage:
+#   setup-js-tooling [--dir <app>]
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REF_JS="${SCRIPT_DIR}/../reference/js"
+
+APP_DIR="$(pwd)"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --dir) APP_DIR="$2"; shift 2 ;;
+    -h|--help) sed -n '2,8p' "$0"; exit 0 ;;
+    *) echo "Unknown arg: $1" >&2; exit 1 ;;
+  esac
+done
+
+APP_DIR="$(cd "$APP_DIR" && pwd)"
+cd "$APP_DIR"
+
+RED=$'\033[0;31m'; GRN=$'\033[0;32m'; YLW=$'\033[0;33m'; BLU=$'\033[0;34m'; NC=$'\033[0m'
+log()  { printf '%s%s%s\n' "$BLU" "$*" "$NC" >&2; }
+ok()   { printf '%s%s%s\n' "$GRN" "$*" "$NC" >&2; }
+warn() { printf '%s%s%s\n' "$YLW" "$*" "$NC" >&2; }
+
+[[ -f package.json ]] || { warn "No package.json — skipping JS tooling"; exit 0; }
+
+detect_frontend() {
+  python3 <<'PY'
+import json
+from pathlib import Path
+data = json.load(open("package.json"))
+deps = {**data.get("dependencies", {}), **data.get("devDependencies", {})}
+if any(k == "react" or k.startswith("@inertiajs/react") for k in deps):
+    print("react")
+elif any(k == "vue" or k.startswith("@inertiajs/vue") or k.startswith("vue") for k in deps):
+    print("vue")
+elif any("svelte" in k for k in deps):
+    print("svelte")
+else:
+    print("generic")
+PY
+}
+
+FRONTEND="$(detect_frontend)"
+log "Detected frontend stack: ${FRONTEND}"
+
+# --- Remove old formatter/linter packages & configs ---
+# Keep vite-plus for build/dev when present; only replace check/format scripts + direct prettier/eslint.
+python3 <<'PY' > /tmp/js-old-pkgs.txt
+import json
+data = json.load(open("package.json"))
+deps = {**data.get("dependencies", {}), **data.get("devDependencies", {})}
+drop = []
+for name in deps:
+    if (
+        name in {"prettier", "eslint"}
+        or name.startswith("prettier-")
+        or name.startswith("eslint-")
+        or name.startswith("@typescript-eslint/")
+        or name.startswith("@prettier/")
+        or name.startswith("eslint-plugin-")
+        or name.startswith("eslint-config-")
+        or name.startswith("eslint-formatter-")
+    ):
+        drop.append(name)
+print("\n".join(sorted(set(drop))))
+PY
+mapfile -t OLD_PKGS < /tmp/js-old-pkgs.txt || true
+
+if [[ ${#OLD_PKGS[@]} -gt 0 && -n "${OLD_PKGS[0]:-}" ]]; then
+  log "Removing old JS lint/format packages: ${OLD_PKGS[*]}"
+  npm uninstall "${OLD_PKGS[@]}" || warn "npm uninstall reported issues"
+fi
+
+# Remove config files
+for f in \
+  .prettierrc .prettierrc.js .prettierrc.cjs .prettierrc.mjs .prettierrc.json .prettierrc.yaml .prettierrc.yml \
+  prettier.config.js prettier.config.cjs prettier.config.mjs prettier.config.ts \
+  .prettierignore \
+  .eslintrc .eslintrc.js .eslintrc.cjs .eslintrc.json .eslintrc.yml \
+  eslint.config.js eslint.config.mjs eslint.config.cjs eslint.config.ts \
+  .eslintignore
+ do
+  [[ -e "$f" ]] && rm -f "$f" && log "Removed ${f}"
+done
+
+# --- Install oxfmt / oxlint / type-aware backend ---
+log "Installing oxfmt, oxlint, oxlint-tsgolint..."
+npm install -D oxfmt oxlint oxlint-tsgolint
+
+# Write configs (overwrite — skill standard)
+cp "${REF_JS}/.oxfmtrc.json" .oxfmtrc.json
+# React plugin only when React; strip react plugin for vue/svelte/generic
+case "$FRONTEND" in
+  react)
+    cp "${REF_JS}/.oxlintrc.json" .oxlintrc.json
+    ;;
+  *)
+    python3 - "${REF_JS}/.oxlintrc.json" <<'PY'
+import json, sys
+cfg = json.load(open(sys.argv[1]))
+cfg["plugins"] = [p for p in cfg.get("plugins", []) if p != "react"]
+json.dump(cfg, open(".oxlintrc.json", "w"), indent=2)
+open(".oxlintrc.json", "a").write("\n")
+PY
+    ;;
+esac
+
+# --- Jest (never Vitest as the app test runner) ---
+log "Installing Jest + Testing Library..."
+JEST_PKGS=(jest @swc/jest jest-environment-jsdom @types/jest identity-obj-proxy)
+case "$FRONTEND" in
+  react)
+    JEST_PKGS+=(@testing-library/react @testing-library/jest-dom @testing-library/dom @testing-library/user-event)
+    ;;
+  vue)
+    JEST_PKGS+=(@testing-library/vue @testing-library/jest-dom @testing-library/dom @vue/test-utils)
+    warn "Vue: Jest uses @swc/jest; prefer SFC tests via @vue/test-utils. See skill notes."
+    ;;
+  svelte)
+    JEST_PKGS+=(@testing-library/svelte @testing-library/jest-dom @testing-library/dom)
+    warn "Svelte: add svelte-jester if .svelte SFCs need compiling under Jest."
+    ;;
+esac
+npm install -D "${JEST_PKGS[@]}"
+
+# If vitest is a *direct* dependency, remove it (transitive via vite-plus is fine).
+python3 <<'PY'
+import json, subprocess, sys
+data = json.load(open("package.json"))
+direct = {**data.get("dependencies", {}), **data.get("devDependencies", {})}
+drop = [n for n in direct if n == "vitest" or n.startswith("@vitest/")]
+if drop:
+    print("Removing direct Vitest packages:", ", ".join(drop))
+    subprocess.check_call(["npm", "uninstall", *drop])
+else:
+    print("No direct Vitest packages to remove")
+PY
+
+cp "${REF_JS}/jest.config.cjs" jest.config.cjs
+mkdir -p resources/js
+cp "${REF_JS}/jest.setup.ts" resources/js/jest.setup.ts
+
+case "$FRONTEND" in
+  react)
+    mkdir -p resources/js/__tests__
+    cp "${REF_JS}/smoke.test.tsx" resources/js/__tests__/smoke.test.tsx
+    ;;
+  *)
+    mkdir -p resources/js/__tests__
+    cat > resources/js/__tests__/smoke.test.ts <<'TS'
+test('js tooling smoke', () => {
+  expect(1 + 1).toBe(2);
+});
+TS
+    # Non-React setups still load jest-dom via setup file — fine.
+    ;;
+esac
+
+# --- package.json scripts ---
+python3 <<'PY'
+import json
+from pathlib import Path
+
+path = Path("package.json")
+data = json.loads(path.read_text())
+scripts = data.setdefault("scripts", {})
+
+# Replace prettier/eslint/vp-check style scripts with oxfmt/oxlint + Jest.
+scripts["format"] = "oxfmt"
+scripts["format:check"] = "oxfmt --check"
+scripts["lint"] = "oxlint"
+# Type-aware + TS diagnostics via oxlint-tsgolint (configured in .oxlintrc.json options).
+scripts["types"] = "oxlint --type-aware --type-check"
+scripts["test:js"] = "jest"
+
+# Retire old check aliases that pointed at prettier/eslint/vp check.
+for dead in ("check", "check:format", "lint:fix", "format:fix", "types:check", "typecheck", "test:unit"):
+    if dead in scripts and any(tok in scripts[dead] for tok in ("prettier", "eslint", "vp check", "tsc --noEmit", "vitest")):
+        # Keep types:check only if it is tsc AND we decide oxlint cannot replace — we use oxlint types instead.
+        scripts.pop(dead, None)
+
+# If types:check remains as tsc and we already set types, drop the duplicate.
+if scripts.get("types:check", "").startswith("tsc"):
+    scripts.pop("types:check", None)
+
+path.write_text(json.dumps(data, indent=4) + "\n")
+print("Updated package.json scripts:", {k: scripts[k] for k in ("format", "format:check", "lint", "types", "test:js") if k in scripts})
+PY
+
+ok "JS tooling ready (oxfmt + oxlint type-aware + Jest)"
+echo "Frontend=${FRONTEND}"

@@ -1,0 +1,33 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "unicorn", "oxc", "react"],
+  "categories": {
+    "correctness": "error"
+  },
+  "options": {
+    "typeAware": true,
+    "typeCheck": true
+  },
+  "ignorePatterns": [
+    "vendor/**",
+    "node_modules/**",
+    "public/build/**",
+    "storage/**",
+    "bootstrap/cache/**",
+    "**/*.config.js",
+    "**/*.config.cjs",
+    "**/*.config.mjs"
+  ],
+  "env": {
+    "builtin": true
+  },
+  "overrides": [
+    {
+      "files": ["**/*.{test,spec}.{js,jsx,ts,tsx}", "**/__tests__/**"],
+      "plugins": ["jest"],
+      "env": {
+        "jest": true
+      }
+    }
+  ]
+}

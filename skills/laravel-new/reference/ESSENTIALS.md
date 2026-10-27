@@ -1,39 +1,100 @@
-# Essentials → source translations
+# Sensible Laravel defaults (paste snippets)
 
-This skill applies [nunomaduro/essentials](https://github.com/nunomaduro/essentials) **defaults as plain Laravel source**. The Composer package is **never** required.
+Kit-agnostic source changes. Prefer registering a dedicated provider so you do not depend on a particular `AppServiceProvider` shape. Or paste the boot body into an existing provider’s `boot()`.
 
-Before applying, agents should fetch the live package README (and optionally `config/essentials.php`) to notice new features:
+## 1. Service provider — `app/Providers/EssentialsServiceProvider.php`
 
-- https://raw.githubusercontent.com/nunomaduro/essentials/main/README.md
-- https://raw.githubusercontent.com/nunomaduro/essentials/main/config/essentials.php
+Create this file, then register it (step 2).
 
-`scripts/apply-essentials` does this check automatically unless `--skip-fetch` is passed.
+```php
+<?php
 
-## Runtime (via `App\Providers\EssentialsServiceProvider`)
+declare(strict_types=1);
 
-| Essentials feature | Default in package | Source translation |
-|--------------------|--------------------|--------------------|
-| `ShouldBeStrict` | enabled | `Model::shouldBeStrict()` |
-| `AutomaticallyEagerLoadRelationships` | enabled | `Model::automaticallyEagerLoadRelationships()` |
-| `ImmutableDates` | enabled | `Date::use(CarbonImmutable::class)` |
-| `ProhibitDestructiveCommands` | enabled | `DB::prohibitDestructiveCommands(app()->isProduction())` |
-| `ForceScheme` | enabled (production) | `URL::forceHttps()` when production |
-| `AggressivePrefetching` | enabled | `Vite::useAggressivePrefetching()` |
-| `SetDefaultPassword` | enabled (skipped in unit tests) | `Password::defaults(...)` with Essentials rules; skipped when `runningUnitTests()` |
-| `FakeSleep` | enabled in unit tests | `Sleep::fake()` when `runningUnitTests()` |
-| `PreventStrayRequests` | enabled in unit tests | `Http::preventStrayRequests()` when `runningUnitTests()` |
-| `Unguard` | **disabled** | Not applied |
+namespace App\Providers;
 
-The provider is registered in `bootstrap/providers.php` (Laravel 11+). This avoids depending on a particular starter kit’s `AppServiceProvider` shape.
+use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Date;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\URL;
+use Illuminate\Support\Facades\Vite;
+use Illuminate\Support\ServiceProvider;
+use Illuminate\Support\Sleep;
+use Illuminate\Validation\Rules\Password;
 
-## Tooling
+final class EssentialsServiceProvider extends ServiceProvider
+{
+    public function register(): void
+    {
+        //
+    }
 
-| Feature | Source translation |
-|---------|-------------------|
-| `make:action` | `app/Console/Commands/MakeActionCommand.php` + `stubs/action.stub` |
-| `essentials:pint` | project `pint.json` from Essentials stub |
-| `essentials:rector` | `rector.php` from Essentials stub if missing |
+    public function boot(): void
+    {
+        Model::shouldBeStrict();
+        Model::automaticallyEagerLoadRelationships();
 
-## Why not the Composer package?
+        Date::use(CarbonImmutable::class);
 
-Requiring `nunomaduro/essentials` couples the app to package boot order and config publish steps. Inlining the defaults keeps the scaffold auditable as a normal commit and works the same across official and community kits.
+        DB::prohibitDestructiveCommands(app()->isProduction());
+
+        if (app()->isProduction()) {
+            URL::forceHttps();
+        }
+
+        Vite::usePrefetchStrategy('aggressive');
+
+        if (! app()->runningUnitTests()) {
+            Password::defaults(fn (): ?Password => app()->isProduction()
+                ? Password::min(12)
+                    ->letters()
+                    ->mixedCase()
+                    ->numbers()
+                    ->symbols()
+                    ->max(255)
+                    ->uncompromised()
+                : null);
+        }
+
+        if (app()->runningUnitTests()) {
+            Http::preventStrayRequests();
+            Sleep::fake();
+        }
+    }
+}
+```
+
+## 2. Register the provider — `bootstrap/providers.php`
+
+Add next to `AppServiceProvider`:
+
+```php
+App\Providers\EssentialsServiceProvider::class,
+```
+
+(Laravel 10 `config/app.php` providers array works the same if that is what the kit uses.)
+
+## 3. `make:action` — copy stubs from this skill
+
+| Copy from skill | Into app |
+|-----------------|----------|
+| `reference/stubs/MakeActionCommand.php` | `app/Console/Commands/MakeActionCommand.php` |
+| `reference/stubs/action.stub` | `stubs/action.stub` |
+
+Auto-discovered on Laravel 11+. Smoke: `php artisan make:action Probe --no-interaction` then delete the generated file.
+
+## 4. Pint — project `pint.json`
+
+Replace (or create) with `reference/stubs/pint.json`. Then run `vendor/bin/pint --parallel` so style lands in the same commit.
+
+If `app/Concerns/ProfileValidationRules.php` exists and Larastan complains after `User` becomes `final`, widen the `emailRules()` PHPDoc to `@return array<int, Unique|string>` and `use Illuminate\Validation\Rules\Unique`.
+
+## 5. Rector (optional) — project `rector.php`
+
+If missing, copy `reference/stubs/rector.php`. Running Rector requires `rector/rector` separately.
+
+## 6. PHPStan
+
+Keep the kit’s `phpstan.neon` / Larastan setup. Do not invent a package-oriented phpstan config. Run `vendor/bin/phpstan analyse` when present.

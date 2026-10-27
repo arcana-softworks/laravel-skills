@@ -52,18 +52,22 @@ jobs:
           git add -A
           git commit -m "Scaffold Laravel application (official react starter kit)"
           "$SKILL/scripts/apply-essentials" --dir "$APP"
-          # Essentials must not add the composer package
-          ! grep -q 'nunomaduro/essentials' composer.json
           test -f app/Providers/EssentialsServiceProvider.php
           grep -q EssentialsServiceProvider bootstrap/providers.php
+          grep -q "Model::shouldBeStrict" app/Providers/EssentialsServiceProvider.php
           git add -A
-          git commit -m "Apply Nuno Maduro Essentials recommendations as source (not nunomaduro/essentials)"
+          git commit -m "Apply sensible Laravel defaults (strict models, immutable dates, make:action, Pint)"
           "$SKILL/scripts/setup-tooling" --dir "$APP" --agents cursor
           git add -A
-          git diff --cached --quiet || git commit -m "Install Laravel Boost, Wayfinder (if needed), and project tooling"
+          git diff --cached --quiet || git commit -m "Install Boost, Wayfinder, oxfmt/oxlint/Jest, and project tooling"
           php artisan test
           vendor/bin/pint --parallel --test
           vendor/bin/phpstan analyse
+          npm run format:check
+          npm run lint
+          npm run types
+          npm run test:js
+          npm run build
           php artisan tinker --execute '
           $id = App\Models\User::factory()->create()->id;
           $u = App\Models\User::query()->findOrFail($id);
