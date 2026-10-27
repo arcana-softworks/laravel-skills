@@ -89,8 +89,10 @@ for f in \
 done
 
 # --- Install oxfmt / oxlint / type-aware backend ---
+# vite-plus (Laravel React/Vue/Svelte kits) pins its own oxlint/oxfmt; use
+# --legacy-peer-deps so we can still depend on them directly for npm scripts.
 log "Installing oxfmt, oxlint, oxlint-tsgolint..."
-npm install -D oxfmt oxlint oxlint-tsgolint
+npm install -D oxfmt oxlint oxlint-tsgolint --legacy-peer-deps
 
 # Write configs (overwrite — skill standard)
 cp "${REF_JS}/.oxfmtrc.json" .oxfmtrc.json
@@ -126,7 +128,7 @@ case "$FRONTEND" in
     warn "Svelte: add svelte-jester if .svelte SFCs need compiling under Jest."
     ;;
 esac
-npm install -D "${JEST_PKGS[@]}"
+npm install -D "${JEST_PKGS[@]}" --legacy-peer-deps
 
 # If vitest is a *direct* dependency, remove it (transitive via vite-plus is fine).
 python3 <<'PY'
@@ -191,6 +193,10 @@ if scripts.get("types:check", "").startswith("tsc"):
 path.write_text(json.dumps(data, indent=4) + "\n")
 print("Updated package.json scripts:", {k: scripts[k] for k in ("format", "format:check", "lint", "types", "test:js") if k in scripts})
 PY
+
+# Format once so format:check is green for the tooling commit.
+log "Running oxfmt (write)..."
+npx oxfmt || warn "oxfmt write reported issues"
 
 ok "JS tooling ready (oxfmt + oxlint type-aware + Jest)"
 echo "Frontend=${FRONTEND}"
