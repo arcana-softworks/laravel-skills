@@ -1,18 +1,29 @@
-# laravel-new-skill
+# arcana-softworks/skills
 
-Public Agent Skill that scaffolds a new Laravel app (any official or community starter kit), applies **sensible Laravel source defaults**, then sets up Boost, Wayfinder (when needed), and JS tooling via **vite-plus (`vp`)** when the kit ships it (oxfmt/oxlint/Vitest fallback otherwise).
+Public collection of Agent Skills for Cursor, Claude Code, Codex, and compatible agents.
 
-## Install
-
-```bash
-npx skills add arcana-softworks/laravel-new-skill
-```
+Install the collection (or a single skill):
 
 ```bash
-npx skills add arcana-softworks/laravel-new-skill --list
-npx skills add arcana-softworks/laravel-new-skill --skill laravel-new -g -a cursor -a claude-code -a codex -y
-npx skills add arcana-softworks/laravel-new-skill --all
+npx skills add arcana-softworks/skills
+npx skills add arcana-softworks/skills --list
+npx skills add arcana-softworks/skills --skill laravel-new -g -a cursor -a claude-code -a codex -y
+npx skills add arcana-softworks/skills --all
 ```
+
+## Skills
+
+| Skill | Path | Summary |
+|-------|------|---------|
+| **laravel-new** | [`skills/laravel-new/`](skills/laravel-new/) | Scaffold a Laravel app (any kit; Inertia React default), apply sensible PHP source defaults, then Boost / Wayfinder / vite-plus (`vp`) JS tooling |
+
+More skills will land under `skills/` over time. Each skill is self-contained (`SKILL.md`, scripts, reference files).
+
+---
+
+## laravel-new
+
+Scaffolds a new Laravel app (any official or community starter kit), applies **sensible Laravel source defaults**, then sets up Boost, Wayfinder (when needed), and JS tooling via **vite-plus (`vp`)** when the kit ships it (oxfmt/oxlint/Vitest fallback otherwise).
 
 | Agent | Typical path | Flag |
 |-------|--------------|------|
@@ -20,7 +31,7 @@ npx skills add arcana-softworks/laravel-new-skill --all
 | Claude Code | `.claude/skills/laravel-new` | `-a claude-code` |
 | Codex | `.agents/skills/laravel-new` | `-a codex` |
 
-## What the skill does
+### What it does
 
 1. **Scaffold** — `laravel new` (or `composer create-project`). Default kit: Inertia React. Commit 1.
 2. **Essentials** — self-contained PHP snippets / `apply-essentials` (strict models, immutable dates, safe console, HTTPS, Vite prefetch, test Http/Sleep nets, `make:action`, Pint). One atomic commit.
@@ -42,7 +53,7 @@ On vite-plus kits, configure `fmt` / `lint` / `test` in `vite.config` (enable `l
 
 Scripts detect the JS package manager from the lockfile (`package-lock.json` → npm, `pnpm-lock.yaml` → pnpm, `yarn.lock` → yarn, `bun.lockb`/`bun.lock` → bun), defaulting to **npm** when no lockfile exists. Pass `--pm pnpm` (or `yarn`/`bun`) to `setup-tooling` / `setup-js-tooling` only when the user explicitly requests that manager — that swaps conflicting lockfiles and rewrites `composer.json` scripts that invoke npm/pnpm/yarn/bun.
 
-## Layout
+### Layout
 
 ```
 skills/laravel-new/
@@ -54,7 +65,7 @@ skills/laravel-new/
   reference/js/                    # ox* configs (fallback) + Vitest smoke
 ```
 
-## Manual usage
+### Manual usage
 
 ```bash
 SKILL=./skills/laravel-new
