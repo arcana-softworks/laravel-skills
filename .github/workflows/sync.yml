@@ -123,6 +123,10 @@ jobs:
       - name: Materialize and push kit branch
         # Never on PRs; only on main (push / schedule / dispatch). kit pushes do not match `on.push.branches: [main]`.
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          # Orphan materialize worktree does not inherit checkout credentials.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          KIT_PUSH_REMOTE: https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
         run: |
           set -euo pipefail
           # Regenerates the orphan `kit` branch from patches (never hand-edited).

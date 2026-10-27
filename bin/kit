@@ -260,8 +260,23 @@ push_kit_branch() {
   branch="$(kit_branch)"
   local work="${CACHE_DIR}/kit-branch-git"
   local remote_url
-  remote_url="$(git -C "$ROOT" remote get-url origin 2>/dev/null || true)"
+  # Prefer an explicit push remote (CI often sets this with a token). Checkout
+  # credentials on GitHub Actions live in the clone's local config and are not
+  # inherited by the fresh orphan worktree used below.
+  remote_url="${KIT_PUSH_REMOTE:-}"
+  if [[ -z "$remote_url" ]]; then
+    remote_url="$(git -C "$ROOT" remote get-url origin 2>/dev/null || true)"
+  fi
   [[ -n "$remote_url" ]] || { err "No git remote 'origin' — cannot push ${branch}"; exit 1; }
+
+  # When GITHUB_TOKEN is present and origin is plain https://github.com/...,
+  # embed the token so the orphan worktree can authenticate.
+  if [[ -n "${GITHUB_TOKEN:-}" && "$remote_url" =~ ^https://github\.com/([^/]+/[^/.]+)(\.git)?$ ]]; then
+    remote_url="https://x-access-token:${GITHUB_TOKEN}@github.com/${BASH_REMATCH[1]}.git"
+  elif [[ -n "${GITHUB_TOKEN:-}" && "$remote_url" =~ ^https://github\.com/ ]]; then
+    # Strip any existing userinfo, then inject the Actions token.
+    remote_url="$(printf '%s' "$remote_url" | sed -E 's#https://([^@]+@)?github.com/#https://x-access-token:'"${GITHUB_TOKEN}"'@github.com/#')"
+  fi
 
   log "Publishing orphan branch '${branch}' to origin (generated tree only) ..."
   rm -rf "$work"
