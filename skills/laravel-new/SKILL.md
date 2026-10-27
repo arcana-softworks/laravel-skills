@@ -4,13 +4,13 @@ description: >-
   Create a new Laravel application with any official or community starter kit
   (Inertia React default), apply sensible Laravel source defaults in one atomic
   commit, then set up Boost, Wayfinder when needed, and JS tooling (oxfmt,
-  oxlint type-aware, Jest). Use when the user asks for a new Laravel app,
-  laravel new, or scaffold Laravel.
+  oxlint type-aware, Vitest via vite-plus when present). Use when the user asks
+  for a new Laravel app, laravel new, or scaffold Laravel.
 ---
 
 # laravel-new
 
-Create a fresh Laravel app → apply sensible source defaults → Boost / Wayfinder / oxfmt+oxlint+Jest.
+Create a fresh Laravel app → apply sensible source defaults → Boost / Wayfinder / oxfmt+oxlint+Vitest.
 
 Install: `npx skills add arcana-softworks/laravel-new-skill` (optionally `--skill laravel-new -g -a cursor -a claude-code -a codex -y`).
 
@@ -34,7 +34,7 @@ Kits: `--react` / `--vue` / `--svelte` / `--livewire` / none / `--using=<package
 
 1. **Scaffold** — untouched kit  
 2. **Essentials** — sensible PHP defaults only (one atomic commit)  
-3. **Tooling** — Boost, Wayfinder (if needed), oxfmt/oxlint/Jest, deps, build, tests  
+3. **Tooling** — Boost, Wayfinder (if needed), oxfmt/oxlint/Vitest, deps, build, tests  
 
 ### 1) Scaffold
 
@@ -74,7 +74,7 @@ Key paste targets (see reference for full blocks):
 ```bash
 "${SKILL_ROOT}/scripts/setup-tooling" --dir . --agents cursor,claude_code,codex
 git add -A
-git commit -m "Install Boost, Wayfinder (if needed), oxfmt/oxlint/Jest, and project tooling"
+git commit -m "Install Boost, Wayfinder (if needed), oxfmt/oxlint/Vitest, and project tooling"
 ```
 
 JS standard (replaces Prettier/ESLint / `vp check` format scripts):
@@ -83,9 +83,9 @@ JS standard (replaces Prettier/ESLint / `vp check` format scripts):
 |------|---------|
 | **oxfmt** | `format`, `format:check` |
 | **oxlint** + **oxlint-tsgolint** | `lint`, `types` (`oxlint --type-aware --type-check`) |
-| **Jest** (+ `@swc/jest`, jsdom; React: Testing Library) | `test:js` — separate from Pest/PHPUnit |
+| **Vitest** (prefer kit `vite-plus` → `vp test`; else `vitest run`) | `test:js` — separate from Pest/PHPUnit |
 
-Do **not** use Vitest as the app JS test runner. Vue/Svelte: same Jest pipeline; use `@vue/test-utils` / `@testing-library/svelte` as noted by `setup-js-tooling`.
+React smoke uses Testing Library + jsdom. Vue/Svelte get the matching Testing Library packages via `setup-js-tooling`.
 
 ### 4) Summarize for the user
 

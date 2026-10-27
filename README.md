@@ -1,6 +1,6 @@
 # laravel-new-skill
 
-Public Agent Skill that scaffolds a new Laravel app (any official or community starter kit), applies **sensible Laravel source defaults**, then sets up Boost, Wayfinder (when needed), and JS tooling (**oxfmt**, **oxlint** type-aware, **Jest**).
+Public Agent Skill that scaffolds a new Laravel app (any official or community starter kit), applies **sensible Laravel source defaults**, then sets up Boost, Wayfinder (when needed), and JS tooling (**oxfmt**, **oxlint** type-aware, **Vitest**).
 
 ## Install
 
@@ -24,7 +24,7 @@ npx skills add arcana-softworks/laravel-new-skill --all
 
 1. **Scaffold** — `laravel new` (or `composer create-project`). Default kit: Inertia React. Commit 1.
 2. **Essentials** — self-contained PHP snippets / `apply-essentials` (strict models, immutable dates, safe console, HTTPS, Vite prefetch, test Http/Sleep nets, `make:action`, Pint). One atomic commit.
-3. **Tooling** — Boost, Wayfinder on Inertia/Vite if missing, **oxfmt** + **oxlint** (+ **oxlint-tsgolint**), **Jest** (`test:js`), build, PHP tests. Separate commit.
+3. **Tooling** — Boost, Wayfinder on Inertia/Vite if missing, **oxfmt** + **oxlint** (+ **oxlint-tsgolint**), **Vitest** (`test:js` → kit `vp test` when `vite-plus` is present), build, PHP tests. Separate commit.
 
 ### JS standard
 
@@ -32,9 +32,9 @@ npx skills add arcana-softworks/laravel-new-skill --all
 |---------|------|-------------|
 | Format | oxfmt | `format`, `format:check` |
 | Lint + TS | oxlint (type-aware / type-check via oxlint-tsgolint) | `lint`, `types` |
-| JS tests | Jest (+ `@swc/jest`, jsdom; React Testing Library) | `test:js` |
+| JS tests | Vitest (via vite-plus `vp test`, or direct `vitest run`) | `test:js` |
 
-Replaces Prettier/ESLint configs and `vp check` / `tsc --noEmit` script aliases. Does **not** use Vitest as the app test runner. PHP stays on Pest/PHPUnit via `php artisan test`.
+Replaces Prettier/ESLint configs and `vp check` / `tsc --noEmit` script aliases. Uses the kit’s Vite+/Vitest toolchain when available. PHP stays on Pest/PHPUnit via `php artisan test`.
 
 ## Layout
 
@@ -44,7 +44,7 @@ skills/laravel-new/
   scripts/scaffold-app | apply-essentials | setup-tooling | setup-js-tooling
   reference/ESSENTIALS.md          # paste-ready PHP snippets
   reference/stubs/                 # pint, rector, make:action
-  reference/js/                    # .oxfmtrc.json, .oxlintrc.json, Jest smoke
+  reference/js/                    # .oxfmtrc.json, .oxlintrc.json, Vitest smoke
 ```
 
 ## Manual usage
@@ -59,7 +59,7 @@ cd my-app && git init -b main && git add -A && git commit -m "Scaffold Laravel a
 git add -A && git commit -m "Apply sensible Laravel defaults"
 
 "$SKILL/scripts/setup-tooling" --dir . --agents cursor,claude_code,codex
-git add -A && git commit -m "Install Boost, Wayfinder, oxfmt/oxlint/Jest, and project tooling"
+git add -A && git commit -m "Install Boost, Wayfinder, oxfmt/oxlint/Vitest, and project tooling"
 
 npm run format:check && npm run lint && npm run types && npm run test:js && npm run build
 php artisan test
@@ -67,4 +67,4 @@ php artisan test
 
 ## License
 
-MIT. Upstream Laravel, Boost, Wayfinder, and Oxc tools remain under their respective licenses.
+MIT. Upstream Laravel, Boost, Wayfinder, Oxc, and Vite+/Vitest remain under their respective licenses.

@@ -59,7 +59,7 @@ jobs:
           git commit -m "Apply sensible Laravel defaults (strict models, immutable dates, make:action, Pint)"
           "$SKILL/scripts/setup-tooling" --dir "$APP" --agents cursor
           git add -A
-          git diff --cached --quiet || git commit -m "Install Boost, Wayfinder, oxfmt/oxlint/Jest, and project tooling"
+          git diff --cached --quiet || git commit -m "Install Boost, Wayfinder, oxfmt/oxlint/Vitest, and project tooling"
           php artisan test
           vendor/bin/pint --parallel --test
           vendor/bin/phpstan analyse
@@ -68,6 +68,12 @@ jobs:
           npm run types
           npm run test:js
           npm run build
+          # No Jest leftovers
+          ! grep -E '"jest"|jest\.config|@swc/jest|jest-environment-jsdom|"@types/jest"' package.json
+          test ! -e jest.config.cjs
+          test ! -e jest.config.js
+          test ! -e resources/js/jest.setup.ts
+          grep -q '"test:js": "vp test"' package.json
           php artisan tinker --execute '
           $id = App\Models\User::factory()->create()->id;
           $u = App\Models\User::query()->findOrFail($id);

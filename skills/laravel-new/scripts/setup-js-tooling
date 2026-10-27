@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # setup-js-tooling — replace Prettier/ESLint (or vp check) with oxfmt + oxlint
-# (type-aware via oxlint-tsgolint) and add Jest (not Vitest) for JS/TS tests.
+# (type-aware via oxlint-tsgolint) and wire Vitest for JS/TS tests (prefer the
+# kit's vite-plus `vp test`; otherwise vitest directly).
 #
 # Usage:
 #   setup-js-tooling [--dir <app>]
@@ -31,7 +32,6 @@ warn() { printf '%s%s%s\n' "$YLW" "$*" "$NC" >&2; }
 detect_frontend() {
   python3 <<'PY'
 import json
-from pathlib import Path
 data = json.load(open("package.json"))
 deps = {**data.get("dependencies", {}), **data.get("devDependencies", {})}
 if any(k == "react" or k.startswith("@inertiajs/react") for k in deps):
@@ -45,11 +45,21 @@ else:
 PY
 }
 
+has_dep() {
+  python3 - "$1" <<'PY'
+import json, sys
+name = sys.argv[1]
+data = json.load(open("package.json"))
+deps = {**data.get("dependencies", {}), **data.get("devDependencies", {})}
+raise SystemExit(0 if name in deps else 1)
+PY
+}
+
 FRONTEND="$(detect_frontend)"
 log "Detected frontend stack: ${FRONTEND}"
 
 # --- Remove old formatter/linter packages & configs ---
-# Keep vite-plus for build/dev when present; only replace check/format scripts + direct prettier/eslint.
+# Keep vite-plus for build/dev/test when present; only replace check/format scripts + direct prettier/eslint.
 python3 <<'PY' > /tmp/js-old-pkgs.txt
 import json
 data = json.load(open("package.json"))
@@ -57,7 +67,16 @@ deps = {**data.get("dependencies", {}), **data.get("devDependencies", {})}
 drop = []
 for name in deps:
     if (
-        name in {"prettier", "eslint"}
+        name in {
+            "prettier",
+            "eslint",
+            "jest",
+            "@swc/jest",
+            "@swc/core",  # only installed previously for Jest transforms
+            "jest-environment-jsdom",
+            "@types/jest",
+            "identity-obj-proxy",
+        }
         or name.startswith("prettier-")
         or name.startswith("eslint-")
         or name.startswith("@typescript-eslint/")
@@ -65,6 +84,7 @@ for name in deps:
         or name.startswith("eslint-plugin-")
         or name.startswith("eslint-config-")
         or name.startswith("eslint-formatter-")
+        or name.startswith("@jest/")
     ):
         drop.append(name)
 print("\n".join(sorted(set(drop))))
@@ -72,29 +92,32 @@ PY
 mapfile -t OLD_PKGS < /tmp/js-old-pkgs.txt || true
 
 if [[ ${#OLD_PKGS[@]} -gt 0 && -n "${OLD_PKGS[0]:-}" ]]; then
-  log "Removing old JS lint/format packages: ${OLD_PKGS[*]}"
-  npm uninstall "${OLD_PKGS[@]}" || warn "npm uninstall reported issues"
+  log "Removing old JS lint/format/Jest packages: ${OLD_PKGS[*]}"
+  npm uninstall "${OLD_PKGS[@]}" --legacy-peer-deps || warn "npm uninstall reported issues"
 fi
 
-# Remove config files
+# Remove config files (formatter/linter + leftover Jest)
 for f in \
   .prettierrc .prettierrc.js .prettierrc.cjs .prettierrc.mjs .prettierrc.json .prettierrc.yaml .prettierrc.yml \
   prettier.config.js prettier.config.cjs prettier.config.mjs prettier.config.ts \
   .prettierignore \
   .eslintrc .eslintrc.js .eslintrc.cjs .eslintrc.json .eslintrc.yml \
   eslint.config.js eslint.config.mjs eslint.config.cjs eslint.config.ts \
-  .eslintignore
+  .eslintignore \
+  jest.config.js jest.config.cjs jest.config.mjs jest.config.ts \
+  resources/js/jest.setup.ts
  do
   [[ -e "$f" ]] && rm -f "$f" && log "Removed ${f}"
 done
 
 # --- Install oxfmt / oxlint / type-aware backend ---
+# vite-plus (Laravel React/Vue/Svelte kits) pins its own oxlint/oxfmt; use
+# --legacy-peer-deps so we can still depend on them directly for npm scripts.
 log "Installing oxfmt, oxlint, oxlint-tsgolint..."
-npm install -D oxfmt oxlint oxlint-tsgolint
+npm install -D oxfmt oxlint oxlint-tsgolint --legacy-peer-deps
 
 # Write configs (overwrite — skill standard)
 cp "${REF_JS}/.oxfmtrc.json" .oxfmtrc.json
-# React plugin only when React; strip react plugin for vue/svelte/generic
 case "$FRONTEND" in
   react)
     cp "${REF_JS}/.oxlintrc.json" .oxlintrc.json
@@ -110,81 +133,140 @@ PY
     ;;
 esac
 
-# --- Jest (never Vitest as the app test runner) ---
-log "Installing Jest + Testing Library..."
-JEST_PKGS=(jest @swc/jest jest-environment-jsdom @types/jest identity-obj-proxy)
+# --- Vitest (prefer vite-plus / kit toolchain) ---
+HAS_VITE_PLUS=0
+has_dep "vite-plus" && HAS_VITE_PLUS=1
+
+TEST_PKGS=(jsdom)
 case "$FRONTEND" in
   react)
-    JEST_PKGS+=(@testing-library/react @testing-library/jest-dom @testing-library/dom @testing-library/user-event)
+    TEST_PKGS+=(@testing-library/react @testing-library/jest-dom @testing-library/dom @testing-library/user-event)
     ;;
   vue)
-    JEST_PKGS+=(@testing-library/vue @testing-library/jest-dom @testing-library/dom @vue/test-utils)
-    warn "Vue: Jest uses @swc/jest; prefer SFC tests via @vue/test-utils. See skill notes."
+    TEST_PKGS+=(@testing-library/vue @testing-library/jest-dom @testing-library/dom @vue/test-utils)
     ;;
   svelte)
-    JEST_PKGS+=(@testing-library/svelte @testing-library/jest-dom @testing-library/dom)
-    warn "Svelte: add svelte-jester if .svelte SFCs need compiling under Jest."
+    TEST_PKGS+=(@testing-library/svelte @testing-library/jest-dom @testing-library/dom)
+    ;;
+  *)
+    TEST_PKGS+=(@testing-library/dom @testing-library/jest-dom)
     ;;
 esac
-npm install -D "${JEST_PKGS[@]}"
 
-# If vitest is a *direct* dependency, remove it (transitive via vite-plus is fine).
-python3 <<'PY'
-import json, subprocess, sys
-data = json.load(open("package.json"))
-direct = {**data.get("dependencies", {}), **data.get("devDependencies", {})}
-drop = [n for n in direct if n == "vitest" or n.startswith("@vitest/")]
-if drop:
-    print("Removing direct Vitest packages:", ", ".join(drop))
-    subprocess.check_call(["npm", "uninstall", *drop])
-else:
-    print("No direct Vitest packages to remove")
+if [[ "$HAS_VITE_PLUS" -eq 1 ]]; then
+  log "Using kit vite-plus Vitest via \`vp test\`"
+  TEST_CMD="vp test"
+else
+  log "No vite-plus — ensuring Vitest is installed"
+  if ! has_dep "vitest"; then
+    TEST_PKGS+=(vitest)
+  fi
+  TEST_CMD="vitest run"
+fi
+
+# React kits using @rolldown/plugin-babel need @babel/core as a peer for vp build/test.
+if has_dep "@rolldown/plugin-babel" && ! has_dep "@babel/core"; then
+  TEST_PKGS+=(@babel/core)
+fi
+
+log "Installing Vitest support packages: ${TEST_PKGS[*]}"
+npm install -D "${TEST_PKGS[@]}" --legacy-peer-deps
+
+mkdir -p resources/js resources/js/__tests__
+cp "${REF_JS}/vitest.setup.ts" resources/js/vitest.setup.ts
+
+# Ensure vite.config.* has a test block when using Vite / vite-plus.
+ensure_vite_test_block() {
+  python3 <<'PY'
+from pathlib import Path
+import re
+
+candidates = [Path(p) for p in ("vite.config.ts", "vite.config.js", "vite.config.mts", "vite.config.mjs")]
+path = next((p for p in candidates if p.is_file()), None)
+if path is None:
+    raise SystemExit(0)
+
+text = path.read_text(encoding="utf-8")
+if re.search(r"\btest\s*:", text):
+    print(f"{path}: test block already present")
+    raise SystemExit(0)
+
+block = """    test: {
+        environment: 'jsdom',
+        include: ['resources/js/**/*.{test,spec}.{js,jsx,ts,tsx}'],
+        setupFiles: ['resources/js/vitest.setup.ts'],
+    },
+"""
+# Insert before the final closing of defineConfig({ ... });
+replaced, n = re.subn(r"(\n)(\}\);?\s*)$", r"\1" + block + r"\2", text, count=1, flags=re.M)
+if n == 0:
+    raise SystemExit(f"Could not insert Vitest test block into {path}")
+path.write_text(replaced, encoding="utf-8")
+print(f"{path}: added Vitest test block")
 PY
+}
 
-cp "${REF_JS}/jest.config.cjs" jest.config.cjs
-mkdir -p resources/js
-cp "${REF_JS}/jest.setup.ts" resources/js/jest.setup.ts
+HAS_VITE_CONFIG=0
+for cfg in vite.config.ts vite.config.js vite.config.mts vite.config.mjs; do
+  [[ -f "$cfg" ]] && HAS_VITE_CONFIG=1 && break
+done
+
+if [[ "$HAS_VITE_PLUS" -eq 1 || "$HAS_VITE_CONFIG" -eq 1 ]]; then
+  ensure_vite_test_block
+else
+  log "Adding standalone vitest.config.ts"
+  cp "${REF_JS}/vitest.config.ts" vitest.config.ts
+fi
 
 case "$FRONTEND" in
   react)
-    mkdir -p resources/js/__tests__
-    cp "${REF_JS}/smoke.test.tsx" resources/js/__tests__/smoke.test.tsx
+    if [[ "$HAS_VITE_PLUS" -eq 1 ]]; then
+      cp "${REF_JS}/smoke.test.tsx" resources/js/__tests__/smoke.test.tsx
+    else
+      # Same smoke, but import from 'vitest' when vite-plus is absent.
+      python3 - "${REF_JS}/smoke.test.tsx" <<'PY'
+from pathlib import Path
+import sys
+src = Path(sys.argv[1]).read_text(encoding="utf-8").replace("vite-plus/test", "vitest")
+Path("resources/js/__tests__/smoke.test.tsx").write_text(src, encoding="utf-8")
+PY
+    fi
     ;;
   *)
-    mkdir -p resources/js/__tests__
-    cat > resources/js/__tests__/smoke.test.ts <<'TS'
-test('js tooling smoke', () => {
-  expect(1 + 1).toBe(2);
-});
-TS
-    # Non-React setups still load jest-dom via setup file — fine.
+    if [[ "$HAS_VITE_PLUS" -eq 1 ]]; then
+      cp "${REF_JS}/smoke.test.ts" resources/js/__tests__/smoke.test.ts
+    else
+      python3 - "${REF_JS}/smoke.test.ts" <<'PY'
+from pathlib import Path
+import sys
+src = Path(sys.argv[1]).read_text(encoding="utf-8").replace("vite-plus/test", "vitest")
+Path("resources/js/__tests__/smoke.test.ts").write_text(src, encoding="utf-8")
+PY
+    fi
     ;;
 esac
 
 # --- package.json scripts ---
-python3 <<'PY'
+python3 - "$TEST_CMD" <<'PY'
 import json
+import sys
 from pathlib import Path
 
+test_cmd = sys.argv[1]
 path = Path("package.json")
 data = json.loads(path.read_text())
 scripts = data.setdefault("scripts", {})
 
-# Replace prettier/eslint/vp-check style scripts with oxfmt/oxlint + Jest.
 scripts["format"] = "oxfmt"
 scripts["format:check"] = "oxfmt --check"
 scripts["lint"] = "oxlint"
-# Type-aware + TS diagnostics via oxlint-tsgolint (configured in .oxlintrc.json options).
 scripts["types"] = "oxlint --type-aware --type-check"
-scripts["test:js"] = "jest"
+scripts["test:js"] = test_cmd
 
-# Retire old check aliases that pointed at prettier/eslint/vp check.
 for dead in ("check", "check:format", "lint:fix", "format:fix", "types:check", "typecheck", "test:unit"):
-    if dead in scripts and any(tok in scripts[dead] for tok in ("prettier", "eslint", "vp check", "tsc --noEmit", "vitest")):
-        # Keep types:check only if it is tsc AND we decide oxlint cannot replace — we use oxlint types instead.
+    if dead in scripts and any(tok in scripts[dead] for tok in ("prettier", "eslint", "vp check", "tsc --noEmit", "jest")):
         scripts.pop(dead, None)
 
-# If types:check remains as tsc and we already set types, drop the duplicate.
 if scripts.get("types:check", "").startswith("tsc"):
     scripts.pop("types:check", None)
 
@@ -192,5 +274,10 @@ path.write_text(json.dumps(data, indent=4) + "\n")
 print("Updated package.json scripts:", {k: scripts[k] for k in ("format", "format:check", "lint", "types", "test:js") if k in scripts})
 PY
 
-ok "JS tooling ready (oxfmt + oxlint type-aware + Jest)"
+# Format once so format:check is green for the tooling commit.
+log "Running oxfmt (write)..."
+npx oxfmt || warn "oxfmt write reported issues"
+
+ok "JS tooling ready (oxfmt + oxlint type-aware + Vitest)"
 echo "Frontend=${FRONTEND}"
+echo "TestCmd=${TEST_CMD}"
