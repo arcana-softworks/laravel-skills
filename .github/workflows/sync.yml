@@ -1,12 +1,11 @@
 name: upstream-sync
 
-# Scheduled + on-demand check that Essentials patches still apply to the
-# official Laravel React starter kit, then run the app's lint/tests/build.
-# Compatible with GitHub Actions and Depot CI on Origin (GitHub Actions syntax).
+# Scheduled + on-demand: keep patches applying to the official React starter kit,
+# verify lint/tests/build, and regenerate the materialized `kit` branch for
+# `laravel new --using=…`. Compatible with GitHub Actions and Depot CI on Origin.
 
 on:
   schedule:
-    # Weekdays 06:15 UTC
     - cron: '15 6 * * 1-5'
   push:
     branches: [main]
@@ -14,7 +13,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: upstream-sync-${{ github.workflow }}-${{ github.ref }}
@@ -28,6 +27,8 @@ jobs:
     steps:
       - name: Checkout kit repo
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
@@ -47,8 +48,8 @@ jobs:
         continue-on-error: true
         run: |
           set -euo pipefail
-          chmod +x bin/essentials-kit
-          if bin/essentials-kit check-upstreams; then
+          chmod +x bin/kit
+          if bin/kit check-upstreams; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
@@ -58,22 +59,21 @@ jobs:
       - name: Fetch pinned starter kit and apply patches
         run: |
           set -euo pipefail
-          chmod +x bin/essentials-kit
-          bin/essentials-kit fetch
-          bin/essentials-kit apply --dir .cache/starter
+          chmod +x bin/kit
+          bin/kit fetch
+          bin/kit apply --dir .cache/starter
 
       - name: Also try applying against origin/main (early warning)
         id: sync_main
         continue-on-error: true
         run: |
           set -euo pipefail
-          # Clone a separate tree at origin/main and attempt apply without mutating the pinned verify tree
           MAIN_SHA=$(git ls-remote https://github.com/laravel/react-starter-kit.git refs/heads/main | awk '{print $1}')
           rm -rf .cache/starter-main
           git clone --depth 1 https://github.com/laravel/react-starter-kit.git .cache/starter-main
           git -C .cache/starter-main fetch --depth 1 origin "$MAIN_SHA"
           git -C .cache/starter-main checkout --force "$MAIN_SHA"
-          if bin/essentials-kit apply --dir .cache/starter-main; then
+          if bin/kit apply --dir .cache/starter-main; then
             echo "main_apply=ok" >> "$GITHUB_OUTPUT"
           else
             echo "main_apply=failed" >> "$GITHUB_OUTPUT"
@@ -115,16 +115,29 @@ jobs:
         working-directory: .cache/starter
         run: php artisan test
 
+      - name: Materialize and push kit branch
+        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule')
+        run: |
+          set -euo pipefail
+          # Regenerates the orphan `kit` branch from patches (never hand-edited).
+          # Required for: laravel new my-app --using=<composer_name>:dev-kit
+          git config user.name "kit-bot"
+          git config user.email "kit-bot@users.noreply.github.com"
+          bin/kit materialize --push
+
       - name: Summarize
         if: always()
         run: |
           set -euo pipefail
+          PKG=$(python3 -c 'import json;print(json.load(open("versions.json"))["kit"]["composer_name"])')
+          BR=$(python3 -c 'import json;print(json.load(open("versions.json"))["kit"]["branch"])')
           echo "### Upstream sync" >> "$GITHUB_STEP_SUMMARY"
           echo "- Pinned starter: \`$(python3 -c 'import json;print(json.load(open("versions.json"))["starter_kit"]["ref"])')\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- Pinned essentials: \`$(python3 -c 'import json;d=json.load(open("versions.json"));print(d["essentials"]["ref"], d["essentials"]["commit"])')\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- Upstreams moved: \`${{ steps.upstreams.outputs.changed }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- Apply on origin/main: \`${{ steps.sync_main.outputs.main_apply }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- \`laravel new\` package: \`${PKG}:dev-${BR}\`" >> "$GITHUB_STEP_SUMMARY"
           if [[ "${{ steps.sync_main.outcome }}" == "failure" ]]; then
             echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "**Action needed:** patches no longer apply to upstream main. Fix with \`bin/essentials-kit regenerate --dir <working-tree>\`." >> "$GITHUB_STEP_SUMMARY"
+            echo "**Action needed:** patches no longer apply to upstream main. Fix with \`bin/kit regenerate --dir <working-tree>\`." >> "$GITHUB_STEP_SUMMARY"
           fi

@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
-# essentials-kit — fetch laravel/react-starter-kit, apply Essentials source patches,
-# regenerate patches, and create apps. Does NOT require nunomaduro/essentials.
+# kit — maintain source patches against laravel/react-starter-kit that encode
+# Nuno Maduro Essentials recommendations (without requiring nunomaduro/essentials),
+# materialize a full-app `kit` branch for `laravel new --using=…`, and create apps.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PATCHES_DIR="${ROOT}/patches"
 SERIES_FILE="${PATCHES_DIR}/series"
 VERSIONS_FILE="${ROOT}/versions.json"
-CACHE_DIR="${ESSENTIALS_KIT_CACHE:-${ROOT}/.cache}"
+CACHE_DIR="${KIT_CACHE:-${ROOT}/.cache}"
 
 RED=$'\033[0;31m'
 GRN=$'\033[0;32m'
@@ -15,9 +16,9 @@ YLW=$'\033[0;33m'
 BLU=$'\033[0;34m'
 NC=$'\033[0m'
 
-log()  { printf '%s%s%s\n' "${BLU}" "$*" "${NC}"; }
-ok()   { printf '%s%s%s\n' "${GRN}" "$*" "${NC}"; }
-warn() { printf '%s%s%s\n' "${YLW}" "$*" "${NC}"; }
+log()  { printf '%s%s%s\n' "${BLU}" "$*" "${NC}" >&2; }
+ok()   { printf '%s%s%s\n' "${GRN}" "$*" "${NC}" >&2; }
+warn() { printf '%s%s%s\n' "${YLW}" "$*" "${NC}" >&2; }
 err()  { printf '%s%s%s\n' "${RED}" "$*" "${NC}" >&2; }
 
 need_cmd() {
@@ -25,7 +26,6 @@ need_cmd() {
 }
 
 json_get() {
-  # json_get <file> <python.expr yielding value>
   local file="$1"
   local expr="$2"
   python3 - "$file" "$expr" <<'PY'
@@ -45,6 +45,8 @@ starter_ref()  { json_get "$VERSIONS_FILE" 'data["starter_kit"]["ref"]'; }
 essentials_repo() { json_get "$VERSIONS_FILE" 'data["essentials"]["repository"]'; }
 essentials_ref()  { json_get "$VERSIONS_FILE" 'data["essentials"]["ref"]'; }
 essentials_commit() { json_get "$VERSIONS_FILE" 'data["essentials"]["commit"]'; }
+kit_branch() { json_get "$VERSIONS_FILE" 'data["kit"]["branch"]'; }
+kit_composer_name() { json_get "$VERSIONS_FILE" 'data["kit"]["composer_name"]'; }
 
 usage() {
   cat <<EOF
@@ -52,19 +54,29 @@ Usage: $(basename "$0") <command> [options]
 
 Commands:
   fetch [--ref <sha|branch|tag>]   Fetch/update the official React starter kit into .cache/
-  apply [--dir <path>]             Apply the Essentials patch series (to --dir or .cache/starter)
+  apply [--dir <path>]             Apply the patch series (to --dir or .cache/starter)
   sync                             Fetch latest upstream main, apply patches, report status
   check-upstreams                  Report whether starter-kit / Essentials moved past pinned refs
   regenerate --dir <patched-tree>  Rebuild patches/* from a working tree vs the pinned upstream
-  create <name> [--force]          One-command: fetch pinned kit, apply patches, write ./<name>
+  materialize [--push] [--dir <p>] Build the full-app tree for laravel new --using (kit branch)
+  create <name> [--force]          One-command: fetch pinned upstream, apply patches, write ./<name>
   verify [--dir <path>]            Apply to a temp (or given) tree and print a summary
-  versions                         Show pinned upstream versions
+  versions                         Show pinned upstream / kit package metadata
   help                             Show this help
 
 Environment:
-  ESSENTIALS_KIT_CACHE   Override cache directory (default: <repo>/.cache)
+  KIT_CACHE   Override cache directory (default: <repo>/.cache)
+
+laravel new --using:
+  After materialize --push, consumers use the Composer package name on branch kit
+  (see versions.json kit.composer_name / kit.branch), e.g.:
+
+    laravel new my-app --using=local/laravel-react-kit:dev-kit
+
+  See README for Packagist, public GitHub/tiged, and private Origin auth.
 
 Examples:
+  $(basename "$0") materialize --push
   $(basename "$0") create my-app
   $(basename "$0") sync
   $(basename "$0") regenerate --dir /path/to/patched-app
@@ -101,6 +113,36 @@ fetch_starter() {
   printf '%s\n' "$head"
 }
 
+# Apply a single patch file into $target.
+# Prefer `git apply` inside a git work tree (reliable). Fall back to GNU `patch -p1`
+# for plain directories — `git apply` outside a repo can exit 0 while skipping hunks.
+apply_one_patch() {
+  local target="$1"
+  local path="$2"
+  local patch_name="$3"
+
+  if [[ -d "${target}/.git" ]]; then
+    if git -C "$target" apply --check "$path" 2>/tmp/kit-apply.err; then
+      git -C "$target" apply "$path"
+      return 0
+    fi
+    return 1
+  fi
+
+  need_cmd patch
+  # --forward: ignore already-applied; fail on rejects
+  if ( cd "$target" && patch -p1 --forward --batch --reject-file=- < "$path" ) > /tmp/kit-apply.err 2>&1; then
+    return 0
+  fi
+  # Some patch versions print "Ignoring" for already-applied and still exit 0/1;
+  # treat any .rej or "FAILED" as failure.
+  if rg -q "FAILED|rejected|hunk ignored|can't find file" /tmp/kit-apply.err; then
+    return 1
+  fi
+  # If dry evidence of skip-without-change, verify a sentinel for known patches
+  return 1
+}
+
 apply_patches() {
   ensure_git_apply
   local target="${1:-}"
@@ -113,19 +155,18 @@ apply_patches() {
   [[ -f "$target/artisan" ]] || { err "Not a Laravel app (missing artisan): $target"; exit 1; }
 
   local patch failed=0
-  log "Applying Essentials patches to ${target} ..."
+  log "Applying patches to ${target} ..."
   while IFS= read -r patch; do
     local path="${PATCHES_DIR}/${patch}"
     [[ -f "$path" ]] || { err "Missing patch file: $path"; exit 1; }
 
-    if git -C "$target" apply --check "$path" 2>/tmp/essentials-kit-apply.err; then
-      git -C "$target" apply "$path"
+    if apply_one_patch "$target" "$path" "$patch"; then
       ok "  applied ${patch}"
     else
       err "  FAILED ${patch}"
-      err "  ---- git apply --check output ----"
-      cat /tmp/essentials-kit-apply.err >&2 || true
-      err "  ----------------------------------"
+      err "  ---- apply output ----"
+      cat /tmp/kit-apply.err >&2 || true
+      err "  ----------------------"
       err "  Patch no longer applies cleanly. Update the working tree, then run:"
       err "    $(basename "$0") regenerate --dir <patched-tree>"
       failed=1
@@ -137,13 +178,113 @@ apply_patches() {
     return 1
   fi
 
+  # Sanity: Essentials runtime patch must leave a detectable marker
+  if ! rg -q "Model::shouldBeStrict" "${target}/app/Providers/AppServiceProvider.php"; then
+    err "Patches reported OK but AppServiceProvider is missing Model::shouldBeStrict — apply was skipped."
+    err "Ensure the target is a git work tree or that GNU patch applied hunks."
+    return 1
+  fi
+
   ok "All patches applied successfully."
   return 0
 }
 
+rewrite_kit_composer_json() {
+  local dir="$1"
+  local name="$2"
+  local starter_sha="$3"
+  local essentials_ref="$4"
+  python3 - "$dir/composer.json" "$name" "$starter_sha" "$essentials_ref" <<'PY'
+import json, sys
+path, name, starter_sha, essentials_ref = sys.argv[1:5]
+data = json.load(open(path))
+data["name"] = name
+data["description"] = (
+    "Generated full-app tree: official laravel/react-starter-kit "
+    f"({starter_sha[:12]}) + Essentials recommendation patches "
+    f"(mapped from nunomaduro/essentials {essentials_ref}; package not required). "
+    "Do not hand-edit — regenerate with bin/kit materialize."
+)
+# Keep type=project for composer create-project / laravel new --using
+data["type"] = "project"
+json.dump(data, open(path, "w"), indent=4)
+open(path, "a").write("\n")
+print(f"composer.json name -> {name}")
+PY
+}
+
+# Build a clean full-app tree (no meta-repo files). Never run composer install here:
+# laravel new / create-project owns dependency install + deferred Chisel hooks.
+materialize_tree() {
+  ensure_git_apply
+  need_cmd rsync
+  local dest="${1:-${CACHE_DIR}/materialized}"
+  local pin
+  pin="$(starter_ref)"
+  local pkg
+  pkg="$(kit_composer_name)"
+
+  log "Materializing full-app kit from $(starter_repo)@${pin} + patches ..."
+  # Apply on the cached git checkout (git apply is reliable with .git present),
+  # then copy the patched tree without .git into the materialize destination.
+  fetch_starter "$pin" >/dev/null
+  apply_patches "${CACHE_DIR}/starter"
+
+  rm -rf "$dest"
+  mkdir -p "$dest"
+  rsync -a --exclude '.git' "${CACHE_DIR}/starter/" "${dest}/"
+  rewrite_kit_composer_json "$dest" "$pkg" "$pin" "$(essentials_ref)"
+
+  # Marker so consumers/CI can tell this tree is generated
+  cat > "${dest}/.kit-generated" <<EOF
+generated_by=bin/kit materialize
+starter_kit_ref=${pin}
+essentials_ref=$(essentials_ref)
+essentials_commit=$(essentials_commit)
+composer_name=${pkg}
+kit_branch=$(kit_branch)
+do_not_hand_edit=1
+EOF
+
+  ok "Materialized at ${dest}"
+  # Path is also written for callers that cannot capture mixed log+path stdout.
+  printf '%s' "$dest" > "${CACHE_DIR}/last-materialized.path"
+  printf '%s\n' "$dest"
+}
+
+push_kit_branch() {
+  ensure_git_apply
+  need_cmd rsync
+  local src="$1"
+  local branch
+  branch="$(kit_branch)"
+  local work="${CACHE_DIR}/kit-branch-git"
+  local remote_url
+  remote_url="$(git -C "$ROOT" remote get-url origin 2>/dev/null || true)"
+  [[ -n "$remote_url" ]] || { err "No git remote 'origin' — cannot push ${branch}"; exit 1; }
+
+  log "Publishing orphan branch '${branch}' to origin (generated tree only) ..."
+  rm -rf "$work"
+  mkdir -p "$work"
+  rsync -a --exclude '.git' "${src}/" "${work}/"
+  git -C "$work" init -q
+  git -C "$work" checkout -B "$branch"
+  git -C "$work" add -A
+  local starter_sha essentials_sha pkg
+  starter_sha="$(starter_ref)"
+  essentials_sha="$(essentials_commit)"
+  pkg="$(kit_composer_name)"
+  git -C "$work" -c user.email=kit@local -c user.name=kit \
+    commit -q -m "materialize ${pkg} from react-starter-kit@${starter_sha:0:12} + Essentials ${essentials_sha:0:12} patches"
+
+  git -C "$work" remote add origin "$remote_url"
+  git -C "$work" push -u --force origin "HEAD:refs/heads/${branch}"
+  ok "Pushed origin/${branch}"
+  ok "Composer version for this branch: dev-${branch}"
+}
+
 check_upstreams() {
   ensure_git_apply
-  need_cmd curl
   mkdir -p "$CACHE_DIR"
 
   local starter_pin essentials_pin
@@ -159,10 +300,9 @@ check_upstreams() {
   fi
 
   log "Checking nunomaduro/essentials ..."
-  local essentials_remote essentials_latest_tag
+  local essentials_remote essentials_latest_tag essentials_tag_sha=""
   essentials_remote="$(git ls-remote "$(essentials_repo)" refs/heads/main | awk '{print $1}')"
   essentials_latest_tag="$(git ls-remote --tags --refs "$(essentials_repo)" 'v*' | awk '{print $2}' | sed 's#refs/tags/##' | sort -V | tail -1)"
-  local essentials_tag_sha=""
   if [[ -n "$essentials_latest_tag" ]]; then
     essentials_tag_sha="$(git ls-remote --tags --refs "$(essentials_repo)" "refs/tags/${essentials_latest_tag}" | awk '{print $1}')"
   fi
@@ -192,7 +332,6 @@ check_upstreams() {
     status=1
   fi
 
-  # Detect meaningful main drift (configurables/stubs), ignoring chore-only commits.
   if [[ -n "$essentials_remote" && "$essentials_pin" != "$essentials_remote" ]]; then
     local ess_tmp="${CACHE_DIR}/essentials-compare"
     rm -rf "$ess_tmp"
@@ -216,8 +355,6 @@ cmd_sync() {
 
   log "Sync: fetching starter kit main (${remote_sha}) ..."
   fetch_starter "$remote_sha" >/dev/null
-
-  # Record attempted sync target
   printf '%s\n' "$remote_sha" > "${CACHE_DIR}/last-sync-starter.sha"
 
   if ! apply_patches "${CACHE_DIR}/starter"; then
@@ -236,6 +373,7 @@ cmd_sync() {
 
 cmd_regenerate() {
   ensure_git_apply
+  need_cmd rsync
   local dir=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -256,11 +394,9 @@ cmd_regenerate() {
   git -C "$base" checkout --force "$pin"
   git -C "$base" reset --hard "$pin"
 
-  # Build a temporary git repo with base commit + patched tree for clean diffs
   local work="${CACHE_DIR}/regenerate-work"
   rm -rf "$work"
   mkdir -p "$work"
-  # Copy base (tracked files only via rsync excluding VCS/deps)
   rsync -a --delete \
     --exclude '.git' \
     --exclude 'vendor' \
@@ -273,6 +409,7 @@ cmd_regenerate() {
     --exclude 'bootstrap/cache/*.php' \
     --exclude 'composer.lock' \
     --exclude 'package-lock.json' \
+    --exclude '.kit-generated' \
     "${base}/" "${work}/"
 
   git -C "$work" init -q
@@ -291,7 +428,23 @@ cmd_regenerate() {
     --exclude 'bootstrap/cache/*.php' \
     --exclude 'composer.lock' \
     --exclude 'package-lock.json' \
+    --exclude '.kit-generated' \
     "${dir}/" "${work}/"
+
+  # If materialize rewrote composer.json name, restore upstream name before diffing
+  # so patches stay relative to official starter kit (single source of truth).
+  if [[ -f "${base}/composer.json" ]]; then
+    python3 - "${base}/composer.json" "${work}/composer.json" <<'PY'
+import json, sys
+base, work = sys.argv[1:3]
+b = json.load(open(base))
+w = json.load(open(work))
+w["name"] = b["name"]
+w["description"] = b.get("description", w.get("description", ""))
+json.dump(w, open(work, "w"), indent=4)
+open(work, "a").write("\n")
+PY
+  fi
 
   git -C "$work" add -A
 
@@ -302,7 +455,6 @@ cmd_regenerate() {
   git -C "$work" diff --cached -- "${runtime[@]}" > "${PATCHES_DIR}/0001-essentials-runtime-defaults.patch"
   git -C "$work" diff --cached -- "${tooling[@]}" > "${PATCHES_DIR}/0002-essentials-tooling-and-make-action.patch"
 
-  # Everything else that differs
   mapfile -t all_files < <(git -C "$work" diff --cached --name-only)
   local rest=()
   local f
@@ -334,8 +486,30 @@ EOF
   warn "Remember to update versions.json if you changed the upstream pin or Essentials mapping."
 }
 
+cmd_materialize() {
+  local push=0 dest=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --push) push=1; shift ;;
+      --dir) dest="$2"; shift 2 ;;
+      *) err "Unknown argument: $1"; exit 1 ;;
+    esac
+  done
+
+  materialize_tree "${dest:-${CACHE_DIR}/materialized}" >/dev/null
+  local out
+  out="$(cat "${CACHE_DIR}/last-materialized.path")"
+  [[ -n "$out" && -d "$out" ]] || { err "materialize failed to produce a tree"; exit 1; }
+  if [[ "$push" -eq 1 ]]; then
+    push_kit_branch "$out"
+  else
+    warn "Tree ready at ${out}. Pass --push to publish origin/$(kit_branch)."
+  fi
+}
+
 cmd_create() {
   ensure_git_apply
+  need_cmd rsync
   local name="" force=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -359,15 +533,12 @@ cmd_create() {
 
   local pin
   pin="$(starter_ref)"
-  log "Creating ${name} from laravel/react-starter-kit@${pin} + Essentials patches ..."
+  log "Creating ${name} from laravel/react-starter-kit@${pin} + patches ..."
 
   fetch_starter "$pin" >/dev/null
+  apply_patches "${CACHE_DIR}/starter"
   mkdir -p "$dest"
   rsync -a --exclude '.git' "${CACHE_DIR}/starter/" "${dest}/"
-  # Fresh git optional — leave as plain tree; skill/agents may init separately
-  apply_patches "$dest"
-
-  # Drop kit cache metadata if any
   rm -rf "${dest}/.cache" 2>/dev/null || true
 
   ok "Created ${dest}"
@@ -375,17 +546,11 @@ cmd_create() {
 
 Next steps:
   cd ${name}
-  composer install
-  cp .env.example .env && php artisan key:generate
-  # sqlite is already prepared by the starter's post-create scripts when using composer create-project;
-  # for this path:
-  touch database/database.sqlite && php artisan migrate
-  npm install && npm run build
-  php artisan test
-  vendor/bin/pint --test
+  composer install --no-interaction --prefer-dist
+  # Prefer laravel new --using=… for full installer/Chisel hook behaviour.
 
-One-liner after create (from the new app directory):
-  composer install --no-interaction && cp -n .env.example .env && php artisan key:generate --force && mkdir -p database && touch database/database.sqlite && php artisan migrate --force && npm install && npm run build
+  Or use the materialized kit branch:
+    laravel new ${name} --using=$(kit_composer_name):dev-$(kit_branch)
 EOF
 }
 
@@ -401,7 +566,6 @@ cmd_verify() {
   if [[ -z "$dir" ]]; then
     fetch_starter "$(starter_ref)" >/dev/null
     dir="${CACHE_DIR}/starter"
-    # Reset to clean pin then apply
     git -C "$dir" reset --hard "$(starter_ref)"
     git -C "$dir" clean -fd
   fi
@@ -410,6 +574,7 @@ cmd_verify() {
   ok "Verify OK on ${dir}"
   echo "Pinned starter:    $(starter_ref)"
   echo "Pinned essentials: $(essentials_ref) ($(essentials_commit))"
+  echo "Kit package:       $(kit_composer_name) (branch $(kit_branch) => dev-$(kit_branch))"
 }
 
 cmd_versions() {
@@ -450,6 +615,7 @@ main() {
     sync) cmd_sync "$@" ;;
     check-upstreams) check_upstreams "$@" ;;
     regenerate) cmd_regenerate "$@" ;;
+    materialize) cmd_materialize "$@" ;;
     create) cmd_create "$@" ;;
     verify) cmd_verify "$@" ;;
     versions) cmd_versions "$@" ;;

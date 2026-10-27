@@ -4,8 +4,9 @@ Start from the **official** [Laravel Inertia React starter kit](https://github.c
 
 This repo is the single source of truth for:
 
-1. **Patch-based kit** — `patches/`, `bin/essentials-kit`, scheduled CI sync  
-2. **Agent skill** — `skills/laravel-react-essentials/SKILL.md` (uses the same patches/script)
+1. **Patches + tooling** — `patches/`, `bin/kit`, scheduled CI sync  
+2. **Materialized installable kit** — orphan branch `kit` (generated only; never hand-edited) for `laravel new --using=…`  
+3. **Agent skill** — `skills/laravel-react-essentials/SKILL.md` (uses the same patches/`bin/kit`)
 
 ## Pinned upstreams
 
@@ -15,15 +16,79 @@ See [`versions.json`](versions.json). Current patch set built against:
 |---------|-----|
 | `laravel/react-starter-kit` | `dbd4817d2d2936be14bc1ca7c94692fcef20b6b1` |
 | `nunomaduro/essentials` | `v1.2.0` (`c5458ca…`) |
+| Materialized Composer package | `local/laravel-react-kit` on branch `kit` → version `dev-kit` |
 
 Feature → file mapping: [`docs/ESSENTIALS_MAPPING.md`](docs/ESSENTIALS_MAPPING.md).
 
-## Quick start (one command)
+## How `laravel new --using` works
+
+From `laravel/installer` v5:
+
+| `--using` value | Installer behaviour |
+|-----------------|---------------------|
+| **No `://` in the string** (Packagist / Composer package) | `composer create-project {using} "{dir}" --stability=dev` |
+| **Contains `://`** (and not a first-party `laravel/*` kit) | `npx tiged@latest {using} "{dir}" && composer install` |
+
+`tiged` only understands **GitHub / GitLab / Bitbucket / Sourcehut / Hugging Face**. It does **not** speak Cursor Origin. For Origin-hosted (or other private) remotes, use the **Composer package** form below.
+
+Branch `kit` on this repo is an **orphan full-app tree** produced by `bin/kit materialize --push` from `patches/` + the pinned upstream. Patches remain the source of truth; never edit `kit` by hand.
+
+### Exact command (Composer / Packagist-style)
+
+Default package name (change in `versions.json` → `kit.composer_name` before publishing):
 
 ```bash
-git clone <this-repo> laravel-react-essentials-kit
-cd laravel-react-essentials-kit
-./bin/essentials-kit create my-app
+laravel new my-app --using=local/laravel-react-kit:dev-kit
+```
+
+That resolves Composer version `dev-kit` → git branch `kit`.
+
+#### A) Public Packagist (best for others)
+
+1. Set `kit.composer_name` to your Packagist name and rematerialize (`bin/kit materialize --push`).
+2. Submit the package on [Packagist](https://packagist.org) with the VCS URL; ensure Packagist tracks branch `kit` (or tags cut from it).
+3. Consumers run:
+
+```bash
+laravel new my-app --using=your-vendor/your-package:dev-kit
+```
+
+No extra Composer config once Packagist is public.
+
+#### B) Public GitHub mirror (tiged URL form)
+
+Mirror/push this repo (or only branch `kit`) to GitHub, then:
+
+```bash
+laravel new my-app --using=https://github.com/OWNER/REPO/tree/kit
+# tiged also accepts: OWNER/REPO#kit
+```
+
+#### C) Private Cursor Origin (or other private Git)
+
+`tiged` cannot fetch Origin. Configure Composer to see the VCS repo, then use the package form:
+
+```bash
+# Once per machine (use a token that can read the repo)
+composer config repositories.laravel-react-kit vcs https://origin.cursor.com/git/OWNER/REPO.git
+
+# Auth — pick what your forge supports, e.g. HTTP basic or a URL with a token:
+composer config http-basic.origin.cursor.com x-access-token YOUR_TOKEN
+# or: git credential / insteadOf / netrc
+
+laravel new my-app --using=local/laravel-react-kit:dev-kit
+```
+
+If the repo is only on Origin and never published to Packagist/GitHub, **every consumer** needs that `repositories` (+ auth) config. Publishing to Packagist or a public GitHub `kit` branch removes that requirement.
+
+### Chisel / `install:features`
+
+The official starter runs `install:features` from Composer / installer hooks. The Laravel installer sets `LARAVEL_INSTALLER_DEFER_HOOKS=1` during `create-project`, then runs deferred hooks afterward (so Chisel is not half-applied mid-install). Prefer **`laravel new --using=…`** over raw `composer install` when you want that behaviour. Materialize **does not** run Composer or Chisel; it only writes the source tree.
+
+## Local one-command (without the installer)
+
+```bash
+./bin/kit create my-app
 cd my-app
 composer install --no-interaction --prefer-dist --no-scripts
 php artisan package:discover
@@ -32,46 +97,29 @@ mkdir -p database && touch database/database.sqlite && php artisan migrate --for
 npm install && npm run build
 ```
 
-### `laravel new --using=…`
-
-The Laravel installer’s `--using` flag expects a **complete** application tree (Composer package or URL fetched via tiged), not this meta/patch repo.
-
-**Best one-command route today:** `./bin/essentials-kit create my-app`.
-
-**Optional:** publish a `kit` branch that contains only the materialized patched app (CI or `create` output). Then:
-
-```bash
-laravel new my-app --using=https://github.com/<you>/<repo>/tree/kit
-# or, once on Packagist as a project package:
-laravel new my-app --using=vendor/laravel-react-essentials-kit
-```
-
-Until that branch/package exists, use `bin/essentials-kit create`.
-
 ## CLI reference
 
 ```bash
-./bin/essentials-kit help
-./bin/essentials-kit versions
-./bin/essentials-kit fetch                 # clone/update pinned starter into .cache/
-./bin/essentials-kit apply --dir <app>     # apply patches/series in order
-./bin/essentials-kit sync                  # fetch origin/main, apply, report failures
-./bin/essentials-kit check-upstreams       # starter + Essentials moved past pins?
-./bin/essentials-kit regenerate --dir <patched-app>
-./bin/essentials-kit create my-app
-./bin/essentials-kit verify
+./bin/kit help
+./bin/kit versions
+./bin/kit fetch
+./bin/kit apply --dir <app>
+./bin/kit sync
+./bin/kit check-upstreams
+./bin/kit regenerate --dir <patched-app>
+./bin/kit materialize          # build .cache/materialized
+./bin/kit materialize --push   # build + force-push orphan branch kit
+./bin/kit create my-app
+./bin/kit verify
 ```
-
-If a patch fails to apply, the tool prints the patch name and `git apply` error so you can fix and regenerate.
 
 ### Regenerating patches
 
-1. `./bin/essentials-kit fetch --ref <new-starter-sha>`
-2. Apply old patches or edit a working tree until Essentials behavior + Pint/PHPStan are green
-3. `./bin/essentials-kit regenerate --dir /path/to/working-tree`
-4. Update `versions.json` (starter SHA and/or Essentials tag/commit)
-5. Update `docs/ESSENTIALS_MAPPING.md` if Essentials gained/lost configurables
-6. `./bin/essentials-kit verify` and run the app’s `pint` / `phpstan` / `php artisan test` / `npm run build`
+1. `./bin/kit fetch --ref <new-starter-sha>`
+2. Fix/apply until Pint / PHPStan / tests are green
+3. `./bin/kit regenerate --dir /path/to/working-tree`
+4. Update `versions.json` + `docs/ESSENTIALS_MAPPING.md` if needed
+5. `./bin/kit verify` then `./bin/kit materialize --push`
 
 ## What the patches change
 
@@ -79,39 +127,36 @@ Runtime (in `AppServiceProvider`): strict models, automatic eager loading, immut
 
 Tooling: Essentials `pint.json`, `rector.php`, and `php artisan make:action` (+ stub).
 
-Code style: Essentials Pint rules applied across the skeleton (strict types, `final` classes, …).
+Code style: Essentials Pint rules across the skeleton.
 
 **Not** applied: `Unguard` (disabled in Essentials by default). **Not** added: `nunomaduro/essentials` package.
 
 ## Agent skill (two commits)
 
-Follow [`skills/laravel-react-essentials/SKILL.md`](skills/laravel-react-essentials/SKILL.md). It must:
-
-1. Scaffold the official kit at the pinned SHA → **one commit**
-2. Run `./bin/essentials-kit apply --dir <app>` → **exactly one Essentials commit**
+Follow [`skills/laravel-react-essentials/SKILL.md`](skills/laravel-react-essentials/SKILL.md). Prefer `laravel new --using=…` when the `kit` branch is available; otherwise scaffold + `bin/kit apply` with exactly two commits.
 
 ## CI sync
 
-[`.github/workflows/sync.yml`](.github/workflows/sync.yml) runs on a weekday schedule, push, and PR:
+[`.github/workflows/sync.yml`](.github/workflows/sync.yml) on schedule / push to `main`:
 
-1. `check-upstreams` (starter `main` + Essentials tags/main vs `versions.json`)
-2. Apply patches to the **pinned** starter and to **current** `origin/main` (fails loudly if apply breaks)
-3. `composer install`, migrate, `npm run build`, Pint, PHPStan, PHPUnit
+1. `check-upstreams`
+2. Apply patches to pinned starter and current upstream `main`
+3. Pint / PHPStan / PHPUnit / `npm run build`
+4. `bin/kit materialize --push` (refreshes orphan `kit` branch)
 
-Works as GitHub Actions; Origin + Depot can run the same workflow syntax. No secrets are required for public upstream fetches.
+Needs `contents: write` (or equivalent) to push `kit`. No app secrets are stored in the repo.
 
 ## Layout
 
 ```
-bin/essentials-kit
+bin/kit
 patches/series
-patches/0001-essentials-runtime-defaults.patch
-patches/0002-essentials-tooling-and-make-action.patch
-patches/0003-essentials-code-style-and-types.patch
+patches/0001-….patch …
 versions.json
 docs/ESSENTIALS_MAPPING.md
 skills/laravel-react-essentials/SKILL.md
 .github/workflows/sync.yml
+# branch kit  → generated full app only (not present on main)
 ```
 
 ## License

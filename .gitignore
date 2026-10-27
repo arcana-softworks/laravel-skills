@@ -1,4 +1,5 @@
 .cache/
+# KIT_CACHE override may point elsewhere; keep default cache local
 .DS_Store
 *.sqlite
 .env

@@ -4,4 +4,4 @@ Canonical skill document:
 
 **[`skills/laravel-react-essentials/SKILL.md`](skills/laravel-react-essentials/SKILL.md)**
 
-Coding agents should load that file. It installs the official Laravel Inertia React starter kit, applies this repo’s Essentials patch set via `bin/essentials-kit` (never `composer require nunomaduro/essentials`), and leaves exactly two commits: scaffold, then Essentials.
+Coding agents should load that file. Prefer `laravel new my-app --using=local/laravel-react-kit:dev-kit` when the generated `kit` branch is available; otherwise install the official React starter kit, apply this repo’s patch set via `bin/kit` (never `composer require nunomaduro/essentials`), and leave exactly two commits: scaffold, then Essentials patches.
