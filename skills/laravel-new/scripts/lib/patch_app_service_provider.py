@@ -6,10 +6,10 @@ import re
 import sys
 from pathlib import Path
 
-# NIST SP 800-63B-4: single-factor passwords SHALL be ≥15 characters.
-# Max 255 is a fixed request/DoS bound (above NIST's ≥64 SHOULD); NOT the
-# users.password column length (that column stores the hash).
-PASSWORD_MIN = 15
+# Min 12: deliberate user choice below NIST SP 800-63B-4's 15-char single-factor
+# SHALL (above ICO's 10; NCSC gives no number). Max 255 is a fixed request/DoS
+# bound (above NIST's ≥64 SHOULD); NOT the users.password column (stores hash).
+PASSWORD_MIN = 12
 PASSWORD_MAX = 255
 
 NCSC_PASSWORD = (

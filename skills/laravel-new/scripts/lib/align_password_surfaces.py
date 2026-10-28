@@ -7,12 +7,12 @@ import sys
 from pathlib import Path
 
 # Shared constants (must match patch_app_service_provider.py).
-PASSWORD_MIN = 15
+PASSWORD_MIN = 12
 PASSWORD_MAX = 255
 
-# 15-char all-lowercase passphrase (spaces count as characters).
-PASS_OK_15 = "three word pass"
-PASS_SHORT_14 = "three word pas"
+# 12-char all-lowercase passphrase (spaces count as characters).
+PASS_OK_12 = "apple banana"
+PASS_SHORT_11 = "apple banan"
 FACTORY_PLAIN = "password"
 
 
@@ -164,37 +164,37 @@ abstract class TestCase extends BaseTestCase
         (
             "tests/Feature/Auth/RegistrationTest.php",
             r"'password'\s*=>\s*'(?:password|apple banana|three word pass)'",
-            f"'password' => '{PASS_OK_15}'",
+            f"'password' => '{PASS_OK_12}'",
         ),
         (
             "tests/Feature/Auth/RegistrationTest.php",
             r"'password_confirmation'\s*=>\s*'(?:password|apple banana|three word pass)'",
-            f"'password_confirmation' => '{PASS_OK_15}'",
+            f"'password_confirmation' => '{PASS_OK_12}'",
         ),
         (
             "tests/Feature/Auth/PasswordResetTest.php",
             r"'password'\s*=>\s*'(?:password|newpassword123|apple banana|three word pass)'",
-            f"'password' => '{PASS_OK_15}'",
+            f"'password' => '{PASS_OK_12}'",
         ),
         (
             "tests/Feature/Auth/PasswordResetTest.php",
             r"'password_confirmation'\s*=>\s*'(?:password|newpassword123|apple banana|three word pass)'",
-            f"'password_confirmation' => '{PASS_OK_15}'",
+            f"'password_confirmation' => '{PASS_OK_12}'",
         ),
         (
             "tests/Feature/Settings/SecurityTest.php",
             r"'password'\s*=>\s*'(?:new-password|apple banana|three word pass)'",
-            f"'password' => '{PASS_OK_15}'",
+            f"'password' => '{PASS_OK_12}'",
         ),
         (
             "tests/Feature/Settings/SecurityTest.php",
             r"'password_confirmation'\s*=>\s*'(?:new-password|apple banana|three word pass)'",
-            f"'password_confirmation' => '{PASS_OK_15}'",
+            f"'password_confirmation' => '{PASS_OK_12}'",
         ),
         (
             "tests/Feature/Settings/SecurityTest.php",
             r"Hash::check\('(?:new-password|apple banana|three word pass)'",
-            f"Hash::check('{PASS_OK_15}'",
+            f"Hash::check('{PASS_OK_12}'",
         ),
     ]
 
@@ -227,7 +227,7 @@ class PasswordCriteriaTest extends TestCase
 {{
     use RefreshDatabase;
 
-    public function test_password_defaults_are_min_15_max_255_uncompromised_without_composition(): void
+    public function test_password_defaults_are_min_12_max_255_uncompromised_without_composition(): void
     {{
         $rules = Password::defaults()->appliedRules();
 
@@ -240,41 +240,41 @@ class PasswordCriteriaTest extends TestCase
         $this->assertFalse($rules['symbols']);
     }}
 
-    public function test_fifteen_char_all_lowercase_passphrase_is_accepted(): void
+    public function test_twelve_char_all_lowercase_passphrase_is_accepted(): void
     {{
         $this->skipUnlessFortifyHas(Features::registration());
 
         $response = $this->post(route('register.store'), [
             'name' => 'Passphrase User',
             'email' => 'passphrase@example.com',
-            'password' => '{PASS_OK_15}',
-            'password_confirmation' => '{PASS_OK_15}',
+            'password' => '{PASS_OK_12}',
+            'password_confirmation' => '{PASS_OK_12}',
         ]);
 
         $response->assertSessionHasNoErrors();
         $this->assertAuthenticated();
     }}
 
-    public function test_fourteen_char_password_is_rejected(): void
+    public function test_eleven_char_password_is_rejected(): void
     {{
         $this->skipUnlessFortifyHas(Features::registration());
 
         $response = $this->post(route('register.store'), [
             'name' => 'Short User',
             'email' => 'short@example.com',
-            'password' => '{PASS_SHORT_14}',
-            'password_confirmation' => '{PASS_SHORT_14}',
+            'password' => '{PASS_SHORT_11}',
+            'password_confirmation' => '{PASS_SHORT_11}',
         ]);
 
         $response->assertSessionHasErrors('password');
         $this->assertGuest();
     }}
 
-    public function test_fifteen_character_multibyte_password_is_accepted(): void
+    public function test_twelve_character_multibyte_password_is_accepted(): void
     {{
         $this->skipUnlessFortifyHas(Features::registration());
 
-        // 15 Unicode code points (accented letters); Password::min uses mb_strlen.
+        // 12 Unicode code points (accented letters); Password::min uses mb_strlen.
         $password = str_repeat('é', {PASSWORD_MIN});
         $this->assertSame({PASSWORD_MIN}, mb_strlen($password));
 
@@ -349,12 +349,12 @@ class PasswordCriteriaTest extends TestCase
             ->actingAs($user)
             ->put(route('user-password.update'), [
                 'current_password' => '{FACTORY_PLAIN}',
-                'password' => '{PASS_OK_15}',
-                'password_confirmation' => '{PASS_OK_15}',
+                'password' => '{PASS_OK_12}',
+                'password_confirmation' => '{PASS_OK_12}',
             ]);
 
         $response->assertSessionHasNoErrors();
-        $this->assertTrue(Hash::check('{PASS_OK_15}', $user->refresh()->password));
+        $this->assertTrue(Hash::check('{PASS_OK_12}', $user->refresh()->password));
     }}
 }}
 """,

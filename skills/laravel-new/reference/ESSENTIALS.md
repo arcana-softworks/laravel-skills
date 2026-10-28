@@ -37,12 +37,13 @@ if (app()->isProduction()) {
 Vite::usePrefetchStrategy('aggressive');
 
 // Passwords (OWASP / NIST SP 800-63B-4 / NCSC):
-// - min 15: NIST SHALL for single-factor memorized secrets (app logs in with password alone)
+// - min 12: deliberate user choice below NIST's 15-char single-factor SHALL
+//   (above ICO's 10; NCSC gives no number)
 // - max 255: fixed request/DoS bound (above NIST's ≥64 SHOULD); NOT the users.password
 //   column length (that column stores the hash, not the plaintext)
 // - no composition rules; uncompromised() = HIBP deny-list (k-anonymity)
 // Laravel Password::min/max count Unicode characters via mb_strlen.
-Password::defaults(fn (): Password => Password::min(15)->max(255)->uncompromised());
+Password::defaults(fn (): Password => Password::min(12)->max(255)->uncompromised());
 
 if (app()->runningUnitTests()) {
     Http::preventStrayRequests();
@@ -83,8 +84,8 @@ If `app/Concerns/ProfileValidationRules.php` exists and Larastan complains after
 ## 5. Password tests (offline)
 
 - Fake `UncompromisedVerifier` in `tests/TestCase.php` so `Password::uncompromised()` does not call HaveIBeenPwned in CI.
-- Align registration / reset / password-update fixtures to ≥15-character passphrases.
-- Cover: 14-char rejected; 15-char all-lowercase accepted; 15-char multibyte accepted; 255 accepted; 256 rejected; hash of `72×a + X` must not verify as `72×a + Y` (no truncation).
+- Align registration / reset / password-update fixtures to ≥12-character passphrases.
+- Cover: 11-char rejected; 12-char all-lowercase accepted; 12-char multibyte accepted; 255 accepted; 256 rejected; hash of `72×a + X` must not verify as `72×a + Y` (no truncation).
 
 ## 6. Rector (optional) — project `rector.php`
 

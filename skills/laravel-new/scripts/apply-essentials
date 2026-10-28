@@ -51,7 +51,8 @@ copy_stub() {
 }
 
 # Fixed password policy constants (shared with Python helpers / docs).
-PASSWORD_MIN=15
+# Min 12: deliberate user choice below NIST SP 800-63B-4's 15-char single-factor SHALL.
+PASSWORD_MIN=12
 PASSWORD_MAX=255
 
 remove_legacy_essentials_provider() {
@@ -231,7 +232,8 @@ cat <<EOF
 Applied:
   - app/Providers/AppServiceProvider.php (essentials in boot()/existing helpers; no EssentialsServiceProvider)
   - Passwords: Password::min(${PASSWORD_MIN})->max(${PASSWORD_MAX})->uncompromised()
-      (NIST SP 800-63B-4 ≥15 for single-factor; fixed max 255 for request/DoS bounds — not the hash column;
+      (min 12 = deliberate user choice below NIST SP 800-63B-4's 15-char single-factor SHALL,
+       above ICO's 10; fixed max 255 for request/DoS bounds — not the hash column;
        NCSC: no composition rules; HIBP uncompromised deny-list)
   - HASH_DRIVER=argon2id with explicit Argon costs ≥ OWASP minimum; rehash_on_login enabled
   - Password criteria tests + UncompromisedVerifier fake in TestCase
