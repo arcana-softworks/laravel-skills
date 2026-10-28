@@ -123,8 +123,8 @@ Key paste targets (see reference for full blocks):
 
 | Where | What |
 |-------|------|
-| `app/Providers/EssentialsServiceProvider.php` | `Model::shouldBeStrict()`, eager load, `Date::use(CarbonImmutable::class)`, prohibit destructive commands, `URL::forceHttps` in production, `Vite::usePrefetchStrategy('aggressive')`, password defaults, `Http::preventStrayRequests` + `Sleep::fake` in unit tests |
-| `bootstrap/providers.php` | Register that provider |
+| `app/Providers/AppServiceProvider.php` | Merge into existing `register()` / `boot()`: `Model::shouldBeStrict()`, eager load, `Date::use(CarbonImmutable::class)`, prohibit destructive commands, `URL::forceHttps` in production, `Vite::usePrefetchStrategy('aggressive')`, NCSC `Password::min(12)->max(N)->uncompromised()` (N = users.password column; min 12 chosen above ICO’s floor of 10; no composition rules), `Http::preventStrayRequests` + `Sleep::fake` in unit tests. **No** `EssentialsServiceProvider`. |
+| Hashing | Prefer `HASH_DRIVER=argon2id` (bcrypt silently truncates at 72 bytes) |
 | `app/Console/Commands/MakeActionCommand.php` + `stubs/action.stub` | From `reference/stubs/` |
 | `pint.json` / optional `rector.php` | From `reference/stubs/` |
 

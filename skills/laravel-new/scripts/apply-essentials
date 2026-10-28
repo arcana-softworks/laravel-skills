@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
-# apply-essentials — idempotently apply sensible Laravel defaults from this skill's
-# reference snippets (dedicated provider, make:action, Pint/Rector stubs).
+# apply-essentials — idempotently apply sensible Laravel defaults into the app's
+# existing AppServiceProvider (plus make:action, Pint/Rector stubs, NCSC passwords).
+#
+# Does NOT create EssentialsServiceProvider or register anything in
+# bootstrap/providers.php.
 #
 # Usage:
 #   apply-essentials [--dir <app>] [--dry-run]
@@ -9,6 +12,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 STUBS_DIR="${SKILL_DIR}/reference/stubs"
+LIB_DIR="${SCRIPT_DIR}/lib"
 
 APP_DIR="$(pwd)"
 DRY_RUN=0
@@ -18,7 +22,7 @@ while [[ $# -gt 0 ]]; do
     --dir) APP_DIR="$2"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
     -h|--help)
-      sed -n '2,8p' "$0"
+      sed -n '2,12p' "$0"
       exit 0
       ;;
     *) echo "Unknown arg: $1" >&2; exit 1 ;;
@@ -35,17 +39,6 @@ err()  { printf '%s%s%s\n' "$RED" "$*" "$NC" >&2; }
 
 [[ -f "${APP_DIR}/artisan" ]] || { err "Not a Laravel app: ${APP_DIR}"; exit 1; }
 
-write_file() {
-  local path="$1"
-  local content="$2"
-  if [[ "$DRY_RUN" -eq 1 ]]; then
-    log "[dry-run] would write ${path}"
-    return 0
-  fi
-  mkdir -p "$(dirname "$path")"
-  printf '%s' "$content" > "$path"
-}
-
 copy_stub() {
   local src="$1"
   local dest="$2"
@@ -57,91 +50,75 @@ copy_stub() {
   cp "$src" "$dest"
 }
 
-PROVIDER_PATH="app/Providers/EssentialsServiceProvider.php"
+# Derive password column length from users migration (default 255 for string()).
+resolve_password_max() {
+  python3 - "$APP_DIR" <<'PY'
+from __future__ import annotations
 
-write_provider() {
-  local dest="${APP_DIR}/${PROVIDER_PATH}"
-  if [[ -f "$dest" ]] && grep -q 'Model::shouldBeStrict' "$dest"; then
-    ok "EssentialsServiceProvider already present"
-    return 0
-  fi
-  log "Writing ${PROVIDER_PATH}"
-  write_file "$dest" "$(cat <<'PHP'
-<?php
+import re
+import sys
+from pathlib import Path
 
-declare(strict_types=1);
+root = Path(sys.argv[1])
+migrations_dir = root / "database" / "migrations"
+migrations = sorted(migrations_dir.glob("*.php")) if migrations_dir.is_dir() else []
+candidates: list[Path] = []
+for path in migrations:
+    if "create_users_table" in path.name:
+        candidates.insert(0, path)
+    else:
+        candidates.append(path)
 
-namespace App\Providers;
+max_len = 255
+found = False
+for path in candidates:
+    text = path.read_text(encoding="utf-8")
+    m = re.search(
+        r"\$table->string\(\s*['\"]password['\"]\s*(?:,\s*(\d+)\s*)?\)",
+        text,
+    )
+    if m:
+        found = True
+        max_len = int(m.group(1)) if m.group(1) else 255
+        break
+    m = re.search(
+        r"\$table->(?:char|varchar)\(\s*['\"]password['\"]\s*,\s*(\d+)\s*\)",
+        text,
+    )
+    if m:
+        found = True
+        max_len = int(m.group(1))
+        break
 
-use Carbon\CarbonImmutable;
-use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Facades\Date;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\URL;
-use Illuminate\Support\Facades\Vite;
-use Illuminate\Support\ServiceProvider;
-use Illuminate\Support\Sleep;
-use Illuminate\Validation\Rules\Password;
-
-final class EssentialsServiceProvider extends ServiceProvider
-{
-    public function register(): void
-    {
-        //
-    }
-
-    public function boot(): void
-    {
-        Model::shouldBeStrict();
-        Model::automaticallyEagerLoadRelationships();
-
-        Date::use(CarbonImmutable::class);
-
-        DB::prohibitDestructiveCommands(app()->isProduction());
-
-        if (app()->isProduction()) {
-            URL::forceHttps();
-        }
-
-        Vite::usePrefetchStrategy('aggressive');
-
-        if (! app()->runningUnitTests()) {
-            Password::defaults(fn (): ?Password => app()->isProduction()
-                ? Password::min(12)
-                    ->letters()
-                    ->mixedCase()
-                    ->numbers()
-                    ->symbols()
-                    ->max(255)
-                    ->uncompromised()
-                : null);
-        }
-
-        if (app()->runningUnitTests()) {
-            Http::preventStrayRequests();
-            Sleep::fake();
-        }
-    }
-}
-PHP
-)"
-  ok "Wrote ${PROVIDER_PATH}"
+print(max_len)
+if found:
+    sys.stderr.write(f"PasswordMax={max_len} (from migration)\n")
+else:
+    sys.stderr.write(f"PasswordMax={max_len} (default; no users.password string() found)\n")
+PY
 }
 
-register_provider() {
+PASSWORD_MAX="$(resolve_password_max)"
+
+remove_legacy_essentials_provider() {
+  local legacy="${APP_DIR}/app/Providers/EssentialsServiceProvider.php"
   local providers_php="${APP_DIR}/bootstrap/providers.php"
-  local config_app="${APP_DIR}/config/app.php"
 
-  if [[ -f "$providers_php" ]]; then
-    if grep -q 'EssentialsServiceProvider' "$providers_php"; then
-      ok "EssentialsServiceProvider already registered in bootstrap/providers.php"
-      return 0
-    fi
-    log "Registering provider in bootstrap/providers.php"
+  if [[ -f "$legacy" ]]; then
     if [[ "$DRY_RUN" -eq 1 ]]; then
+      log "[dry-run] would remove ${legacy}"
+    else
+      log "Removing legacy EssentialsServiceProvider.php"
+      rm -f "$legacy"
+    fi
+  fi
+
+  if [[ -f "$providers_php" ]] && grep -q 'EssentialsServiceProvider' "$providers_php"; then
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+      log "[dry-run] would unregister EssentialsServiceProvider from bootstrap/providers.php"
       return 0
     fi
+    log "Unregistering EssentialsServiceProvider from bootstrap/providers.php"
     python3 - "$providers_php" <<'PY'
 from pathlib import Path
 import re
@@ -149,36 +126,43 @@ import sys
 
 path = Path(sys.argv[1])
 text = path.read_text(encoding="utf-8")
-line = "    App\\Providers\\EssentialsServiceProvider::class,"
-if "EssentialsServiceProvider" in text:
-    raise SystemExit(0)
-needle = "App\\Providers\\AppServiceProvider::class,"
-if needle in text:
-    text = text.replace(needle, needle + "\n" + line, 1)
-else:
-    text2, n = re.subn(
-        r"(\n\s*)(\];\s*)$",
-        r"\1    App\\Providers\\EssentialsServiceProvider::class,\n\1\2",
-        text,
-        count=1,
-        flags=re.M,
-    )
-    if n == 0:
-        raise SystemExit("Could not register EssentialsServiceProvider in bootstrap/providers.php")
-    text = text2
-path.write_text(text, encoding="utf-8")
+text2 = re.sub(
+    r"\n[ \t]*App\\Providers\\EssentialsServiceProvider::class,?[ \t]*",
+    "\n",
+    text,
+)
+text2 = re.sub(
+    r"(?m)^use\s+App\\Providers\\EssentialsServiceProvider\s*;\s*\n",
+    "",
+    text2,
+)
+path.write_text(text2, encoding="utf-8")
 PY
-    ok "Registered in bootstrap/providers.php"
-    return 0
   fi
+}
 
-  if [[ -f "$config_app" ]]; then
-    err "Legacy config/app.php providers detected — register App\\Providers\\EssentialsServiceProvider manually."
+patch_app_service_provider() {
+  local dest="${APP_DIR}/app/Providers/AppServiceProvider.php"
+  if [[ ! -f "$dest" ]]; then
+    err "Missing app/Providers/AppServiceProvider.php"
     exit 1
   fi
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    log "[dry-run] would merge essentials into ${dest} (password max=${PASSWORD_MAX})"
+    return 0
+  fi
+  log "Merging essentials into app/Providers/AppServiceProvider.php (password max=${PASSWORD_MAX})"
+  python3 "${LIB_DIR}/patch_app_service_provider.py" "$dest" "$PASSWORD_MAX"
+  ok "AppServiceProvider essentials merge done"
+}
 
-  err "Could not find bootstrap/providers.php to register the provider"
-  exit 1
+align_password_surfaces() {
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    log "[dry-run] would align password tests, hashing, and UI copy"
+    return 0
+  fi
+  log "Aligning password surfaces for NCSC defaults (max=${PASSWORD_MAX})"
+  python3 "${LIB_DIR}/align_password_surfaces.py" "$APP_DIR" "$PASSWORD_MAX" "$STUBS_DIR"
 }
 
 install_make_action() {
@@ -278,8 +262,9 @@ run_pint_if_available() {
   fi
 }
 
-write_provider
-register_provider
+remove_legacy_essentials_provider
+patch_app_service_provider
+align_password_surfaces
 install_make_action
 install_pint
 fix_profile_validation_phpdoc
@@ -290,8 +275,10 @@ ok "Sensible defaults applied in ${APP_DIR}"
 cat <<EOF
 
 Applied:
-  - ${PROVIDER_PATH}
-  - Provider registered
+  - app/Providers/AppServiceProvider.php (essentials in boot()/existing helpers; no EssentialsServiceProvider)
+  - NCSC passwords: Password::min(12)->max(${PASSWORD_MAX})->uncompromised() (max = users.password column)
+  - HASH_DRIVER=argon2id (avoid bcrypt silent 72-byte truncation)
+  - Password criteria tests + UncompromisedVerifier fake in TestCase
   - php artisan make:action (+ stubs/action.stub)
   - pint.json (+ Pint when vendor present)
   - rector.php (if missing)

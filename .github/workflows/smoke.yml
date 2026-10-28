@@ -52,9 +52,16 @@ jobs:
           git add -A
           git commit -m "Scaffold Laravel application (official react starter kit)"
           "$SKILL/scripts/apply-essentials" --dir "$APP"
-          test -f app/Providers/EssentialsServiceProvider.php
-          grep -q EssentialsServiceProvider bootstrap/providers.php
-          grep -q "Model::shouldBeStrict" app/Providers/EssentialsServiceProvider.php
+          test -f app/Providers/AppServiceProvider.php
+          test ! -e app/Providers/EssentialsServiceProvider.php
+          ! grep -q EssentialsServiceProvider bootstrap/providers.php
+          ! grep -R --fixed-strings 'EssentialsServiceProvider' app bootstrap --include='*.php'
+          grep -q "Model::shouldBeStrict" app/Providers/AppServiceProvider.php
+          grep -qE 'Password::min\(12\)->max\([0-9]+\)->uncompromised\(\)' app/Providers/AppServiceProvider.php
+          ! grep -qE 'mixedCase\(|->numbers\(|->symbols\(' app/Providers/AppServiceProvider.php
+          grep -q 'HASH_DRIVER=argon2id' .env.example
+          test -f tests/Feature/Auth/PasswordCriteriaTest.php
+          grep -q UncompromisedVerifier tests/TestCase.php
           git add -A
           git commit -m "Apply sensible Laravel defaults (strict models, immutable dates, make:action, Pint)"
           "$SKILL/scripts/setup-tooling" --dir "$APP" --agents cursor
