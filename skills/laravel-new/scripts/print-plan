@@ -99,7 +99,7 @@ emit() {
 }
 
 emit scaffold "Create \`${APP_NAME}\` with $(kit_label), ${DATABASE}, ${TEST_FRAMEWORK}"
-emit essentials "Apply Essentials into AppServiceProvider boot() (strict models, eager load, CarbonImmutable, prohibit destructive commands, forceHttps, Vite prefetch, NCSC Password::min(12)->max(column)->uncompromised with no composition rules, Http/Sleep test nets), make:action + stub, pint.json (+ optional rector.php) — no EssentialsServiceProvider"
+emit essentials "Apply Essentials into AppServiceProvider boot() (strict models, eager load, CarbonImmutable, prohibit destructive commands, forceHttps, Vite prefetch, Password::min(15)->max(255)->uncompromised per NIST/OWASP/NCSC with no composition rules + argon2id, Http/Sleep test nets), make:action + stub, pint.json (+ optional rector.php) — no EssentialsServiceProvider"
 emit boost "Install laravel/boost (dev) and run boost:install for agents: ${AGENTS}"
 
 if [[ "$WAYFINDER_LIKELY" -eq 1 ]]; then

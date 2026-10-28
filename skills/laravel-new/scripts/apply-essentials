@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # apply-essentials — idempotently apply sensible Laravel defaults into the app's
-# existing AppServiceProvider (plus make:action, Pint/Rector stubs, NCSC passwords).
+# existing AppServiceProvider (plus make:action, Pint/Rector stubs, NIST/OWASP/NCSC passwords).
 #
 # Does NOT create EssentialsServiceProvider or register anything in
 # bootstrap/providers.php.
@@ -50,55 +50,9 @@ copy_stub() {
   cp "$src" "$dest"
 }
 
-# Derive password column length from users migration (default 255 for string()).
-resolve_password_max() {
-  python3 - "$APP_DIR" <<'PY'
-from __future__ import annotations
-
-import re
-import sys
-from pathlib import Path
-
-root = Path(sys.argv[1])
-migrations_dir = root / "database" / "migrations"
-migrations = sorted(migrations_dir.glob("*.php")) if migrations_dir.is_dir() else []
-candidates: list[Path] = []
-for path in migrations:
-    if "create_users_table" in path.name:
-        candidates.insert(0, path)
-    else:
-        candidates.append(path)
-
-max_len = 255
-found = False
-for path in candidates:
-    text = path.read_text(encoding="utf-8")
-    m = re.search(
-        r"\$table->string\(\s*['\"]password['\"]\s*(?:,\s*(\d+)\s*)?\)",
-        text,
-    )
-    if m:
-        found = True
-        max_len = int(m.group(1)) if m.group(1) else 255
-        break
-    m = re.search(
-        r"\$table->(?:char|varchar)\(\s*['\"]password['\"]\s*,\s*(\d+)\s*\)",
-        text,
-    )
-    if m:
-        found = True
-        max_len = int(m.group(1))
-        break
-
-print(max_len)
-if found:
-    sys.stderr.write(f"PasswordMax={max_len} (from migration)\n")
-else:
-    sys.stderr.write(f"PasswordMax={max_len} (default; no users.password string() found)\n")
-PY
-}
-
-PASSWORD_MAX="$(resolve_password_max)"
+# Fixed password policy constants (shared with Python helpers / docs).
+PASSWORD_MIN=15
+PASSWORD_MAX=255
 
 remove_legacy_essentials_provider() {
   local legacy="${APP_DIR}/app/Providers/EssentialsServiceProvider.php"
@@ -148,11 +102,11 @@ patch_app_service_provider() {
     exit 1
   fi
   if [[ "$DRY_RUN" -eq 1 ]]; then
-    log "[dry-run] would merge essentials into ${dest} (password max=${PASSWORD_MAX})"
+    log "[dry-run] would merge essentials into ${dest} (Password::min(${PASSWORD_MIN})->max(${PASSWORD_MAX}))"
     return 0
   fi
-  log "Merging essentials into app/Providers/AppServiceProvider.php (password max=${PASSWORD_MAX})"
-  python3 "${LIB_DIR}/patch_app_service_provider.py" "$dest" "$PASSWORD_MAX"
+  log "Merging essentials into app/Providers/AppServiceProvider.php (Password::min(${PASSWORD_MIN})->max(${PASSWORD_MAX}))"
+  python3 "${LIB_DIR}/patch_app_service_provider.py" "$dest"
   ok "AppServiceProvider essentials merge done"
 }
 
@@ -161,8 +115,8 @@ align_password_surfaces() {
     log "[dry-run] would align password tests, hashing, and UI copy"
     return 0
   fi
-  log "Aligning password surfaces for NCSC defaults (max=${PASSWORD_MAX})"
-  python3 "${LIB_DIR}/align_password_surfaces.py" "$APP_DIR" "$PASSWORD_MAX" "$STUBS_DIR"
+  log "Aligning password surfaces (NIST min ${PASSWORD_MIN} / max ${PASSWORD_MAX}, argon2id)"
+  python3 "${LIB_DIR}/align_password_surfaces.py" "$APP_DIR" "$STUBS_DIR"
 }
 
 install_make_action() {
@@ -276,8 +230,10 @@ cat <<EOF
 
 Applied:
   - app/Providers/AppServiceProvider.php (essentials in boot()/existing helpers; no EssentialsServiceProvider)
-  - NCSC passwords: Password::min(12)->max(${PASSWORD_MAX})->uncompromised() (max = users.password column)
-  - HASH_DRIVER=argon2id (avoid bcrypt silent 72-byte truncation)
+  - Passwords: Password::min(${PASSWORD_MIN})->max(${PASSWORD_MAX})->uncompromised()
+      (NIST SP 800-63B-4 ≥15 for single-factor; fixed max 255 for request/DoS bounds — not the hash column;
+       NCSC: no composition rules; HIBP uncompromised deny-list)
+  - HASH_DRIVER=argon2id with explicit Argon costs ≥ OWASP minimum; rehash_on_login enabled
   - Password criteria tests + UncompromisedVerifier fake in TestCase
   - php artisan make:action (+ stubs/action.stub)
   - pint.json (+ Pint when vendor present)

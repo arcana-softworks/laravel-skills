@@ -57,10 +57,15 @@ jobs:
           ! grep -q EssentialsServiceProvider bootstrap/providers.php
           ! grep -R --fixed-strings 'EssentialsServiceProvider' app bootstrap --include='*.php'
           grep -q "Model::shouldBeStrict" app/Providers/AppServiceProvider.php
-          grep -qE 'Password::min\(12\)->max\([0-9]+\)->uncompromised\(\)' app/Providers/AppServiceProvider.php
+          grep -q 'Password::min(15)->max(255)->uncompromised()' app/Providers/AppServiceProvider.php
           ! grep -qE 'mixedCase\(|->numbers\(|->symbols\(' app/Providers/AppServiceProvider.php
           grep -q 'HASH_DRIVER=argon2id' .env.example
+          grep -q 'ARGON_MEMORY=65536' .env.example
+          grep -q "'rehash_on_login' => true" config/hashing.php
           test -f tests/Feature/Auth/PasswordCriteriaTest.php
+          grep -q 'test_fourteen_char_password_is_rejected' tests/Feature/Auth/PasswordCriteriaTest.php
+          grep -q 'test_fifteen_character_multibyte_password_is_accepted' tests/Feature/Auth/PasswordCriteriaTest.php
+          grep -q 'test_hash_driver_does_not_truncate_past_seventy_two_bytes' tests/Feature/Auth/PasswordCriteriaTest.php
           grep -q UncompromisedVerifier tests/TestCase.php
           git add -A
           git commit -m "Apply sensible Laravel defaults (strict models, immutable dates, make:action, Pint)"

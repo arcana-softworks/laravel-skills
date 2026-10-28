@@ -123,8 +123,8 @@ Key paste targets (see reference for full blocks):
 
 | Where | What |
 |-------|------|
-| `app/Providers/AppServiceProvider.php` | Merge into existing `register()` / `boot()`: `Model::shouldBeStrict()`, eager load, `Date::use(CarbonImmutable::class)`, prohibit destructive commands, `URL::forceHttps` in production, `Vite::usePrefetchStrategy('aggressive')`, NCSC `Password::min(12)->max(N)->uncompromised()` (N = users.password column; min 12 chosen above ICO’s floor of 10; no composition rules), `Http::preventStrayRequests` + `Sleep::fake` in unit tests. **No** `EssentialsServiceProvider`. |
-| Hashing | Prefer `HASH_DRIVER=argon2id` (bcrypt silently truncates at 72 bytes) |
+| `app/Providers/AppServiceProvider.php` | Merge into existing `register()` / `boot()`: `Model::shouldBeStrict()`, eager load, `Date::use(CarbonImmutable::class)`, prohibit destructive commands, `URL::forceHttps` in production, `Vite::usePrefetchStrategy('aggressive')`, `Password::min(15)->max(255)->uncompromised()` (NIST ≥15 single-factor; fixed max 255 for request/DoS bounds — not the hash column; NCSC: no composition rules; HIBP deny-list), `Http::preventStrayRequests` + `Sleep::fake` in unit tests. **No** `EssentialsServiceProvider`. |
+| Hashing | `HASH_DRIVER=argon2id` with explicit costs ≥ OWASP min (m=65536, t=4, p=1); `rehash_on_login` enabled |
 | `app/Console/Commands/MakeActionCommand.php` + `stubs/action.stub` | From `reference/stubs/` |
 | `pint.json` / optional `rector.php` | From `reference/stubs/` |
 

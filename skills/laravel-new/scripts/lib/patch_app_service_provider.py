@@ -6,17 +6,22 @@ import re
 import sys
 from pathlib import Path
 
+# NIST SP 800-63B-4: single-factor passwords SHALL be ≥15 characters.
+# Max 255 is a fixed request/DoS bound (above NIST's ≥64 SHOULD); NOT the
+# users.password column length (that column stores the hash).
+PASSWORD_MIN = 15
+PASSWORD_MAX = 255
+
+NCSC_PASSWORD = (
+    "Password::defaults(fn (): Password => "
+    f"Password::min({PASSWORD_MIN})->max({PASSWORD_MAX})->uncompromised());"
+)
+
 
 def main() -> int:
     path = Path(sys.argv[1])
-    password_max = int(sys.argv[2])
     text = path.read_text(encoding="utf-8")
     original = text
-
-    ncsc_password = (
-        "Password::defaults(fn (): Password => "
-        f"Password::min(12)->max({password_max})->uncompromised());"
-    )
 
     required_uses = [
         "Carbon\\CarbonImmutable",
@@ -50,21 +55,20 @@ def main() -> int:
         insert_at = m.end() if m else 0
         return src[:insert_at] + "\n\n" + "\n".join(use_lines) + "\n" + src[insert_at:]
 
-    def password_defaults_is_ncsc(src: str) -> bool:
+    def password_defaults_is_target(src: str) -> bool:
         patterns = [
             rf"Password::defaults\s*\(\s*fn\s*\([^)]*\)\s*:\s*\??Password\s*=>\s*"
-            rf"Password::min\s*\(\s*12\s*\)\s*->max\s*\(\s*{password_max}\s*\)\s*"
+            rf"Password::min\s*\(\s*{PASSWORD_MIN}\s*\)\s*->max\s*\(\s*{PASSWORD_MAX}\s*\)\s*"
             rf"->uncompromised\s*\(\s*\)\s*\)\s*;",
             rf"Password::defaults\s*\(\s*fn\s*\([^)]*\)\s*=>\s*"
-            rf"Password::min\s*\(\s*12\s*\)\s*->max\s*\(\s*{password_max}\s*\)\s*"
+            rf"Password::min\s*\(\s*{PASSWORD_MIN}\s*\)\s*->max\s*\(\s*{PASSWORD_MAX}\s*\)\s*"
             rf"->uncompromised\s*\(\s*\)\s*\)\s*;",
         ]
         for pat in patterns:
             m = re.search(pat, src, flags=re.S)
             if not m:
                 continue
-            chunk = m.group(0)
-            if re.search(r"mixedCase\s*\(|->numbers\s*\(|->symbols\s*\(|->letters\s*\(", chunk):
+            if re.search(r"mixedCase\s*\(|->numbers\s*\(|->symbols\s*\(|->letters\s*\(", m.group(0)):
                 return False
             return True
         return False
@@ -87,7 +91,7 @@ def main() -> int:
                         end += 1
                     if end < len(src) and src[end] == ";":
                         end += 1
-                    return src[:start] + ncsc_password + src[end:]
+                    return src[:start] + NCSC_PASSWORD + src[end:]
             i += 1
         return src
 
@@ -157,9 +161,8 @@ def main() -> int:
     text = ensure_uses(text)
 
     if re.search(r"Password::defaults\s*\(", text):
-        if not password_defaults_is_ncsc(text):
+        if not password_defaults_is_target(text):
             text = replace_password_defaults(text)
-    # else insert via boot snippets
 
     to_add: list[str] = []
     for probe, code in boot_snippets:
@@ -168,12 +171,12 @@ def main() -> int:
         to_add.append(code)
 
     if not re.search(r"Password::defaults\s*\(", text):
-        to_add.append(ncsc_password)
+        to_add.append(NCSC_PASSWORD)
 
     if to_add:
         text = insert_into_boot(text, to_add)
 
-    if not password_defaults_is_ncsc(text) and re.search(r"Password::defaults\s*\(", text):
+    if not password_defaults_is_target(text) and re.search(r"Password::defaults\s*\(", text):
         text = replace_password_defaults(text)
 
     if text != original:

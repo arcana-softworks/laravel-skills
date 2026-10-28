@@ -55,7 +55,7 @@ Helper: `skills/laravel-new/scripts/print-plan --app my-app --kit react`.
 ### What it does
 
 1. **Scaffold** — `laravel new` (or `composer create-project`). Default kit: Inertia React. Commit 1.
-2. **Essentials** — `apply-essentials` merges into `AppServiceProvider` (strict models, immutable dates, safe console, HTTPS, Vite prefetch, NCSC `Password::min(12)->max(column)->uncompromised()`, test Http/Sleep nets, `make:action`, Pint). No `EssentialsServiceProvider`. One atomic commit.
+2. **Essentials** — `apply-essentials` merges into `AppServiceProvider` (strict models, immutable dates, safe console, HTTPS, Vite prefetch, NIST/OWASP/NCSC `Password::min(15)->max(255)->uncompromised()` + argon2id, test Http/Sleep nets, `make:action`, Pint). No `EssentialsServiceProvider`. One atomic commit.
 3. **Tooling** — Boost, Wayfinder on Inertia/Vite if missing, **vite-plus `vp`** JS tooling (or oxfmt/oxlint/Vitest fallback), **anti-slop**, generated app **`.github/workflows/ci.yml`**, build, PHP tests. Separate commit.
 4. **Docker** (optional step) — [ServerSideUp PHP](https://serversideup.net/open-source/docker-php/) multi-stage image (`fpm-nginx` default; offer `frankenphp`), compose for local + prod (queue + scheduler), dedicated commit preferred.
 

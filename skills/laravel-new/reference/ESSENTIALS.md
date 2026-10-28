@@ -2,6 +2,8 @@
 
 Kit-agnostic source changes. Apply into the install’s existing **`app/Providers/AppServiceProvider.php`** (`register()` / `boot()`), merging with any kit content already there. Do **not** create an `EssentialsServiceProvider`.
 
+Password policy cites **OWASP Password Storage**, **NIST SP 800-63B-4**, and **NCSC** guidance.
+
 ## 1. `AppServiceProvider` — imports + `boot()` body
 
 Ensure these `use` imports (skip any already present):
@@ -34,10 +36,13 @@ if (app()->isProduction()) {
 
 Vite::usePrefetchStrategy('aggressive');
 
-// NCSC-aligned passwords: min length, deny-list breached passwords, no composition
-// rules, max = users.password column length (system capability — usually 255).
-// Min 12: NCSC gives no number; ICO says no less than 10; we choose 12.
-Password::defaults(fn (): Password => Password::min(12)->max(255)->uncompromised());
+// Passwords (OWASP / NIST SP 800-63B-4 / NCSC):
+// - min 15: NIST SHALL for single-factor memorized secrets (app logs in with password alone)
+// - max 255: fixed request/DoS bound (above NIST's ≥64 SHOULD); NOT the users.password
+//   column length (that column stores the hash, not the plaintext)
+// - no composition rules; uncompromised() = HIBP deny-list (k-anonymity)
+// Laravel Password::min/max count Unicode characters via mb_strlen.
+Password::defaults(fn (): Password => Password::min(15)->max(255)->uncompromised());
 
 if (app()->runningUnitTests()) {
     Http::preventStrayRequests();
@@ -45,13 +50,16 @@ if (app()->runningUnitTests()) {
 }
 ```
 
-If the kit already defines `Password::defaults(...)` (often production-only with `mixedCase` / `numbers` / `symbols`), **replace** it with the NCSC one-liner above. Derive `max(N)` from the users migration (`$table->string('password')` → 255, or an explicit length).
+If the kit already defines `Password::defaults(...)` (often production-only with `mixedCase` / `numbers` / `symbols`, or an older min/max), **replace** it with the one-liner above.
 
-Prefer three-random-words passphrases in UI copy ([NCSC](https://www.ncsc.gov.uk/collection/top-tips-for-staying-secure-online/three-random-words)).
+Promote three-random-words passphrases (and a password manager) in UI copy ([NCSC](https://www.ncsc.gov.uk/collection/top-tips-for-staying-secure-online/three-random-words)).
 
-### Hashing (long passphrases)
+### Hashing (OWASP first choice: Argon2id)
 
-Bcrypt silently truncates past **72 bytes**. laravel-new sets **`HASH_DRIVER=argon2id`** (`.env.example`, `phpunit.xml`, and publishes `config/hashing.php` when missing). If you switch back to bcrypt, set `BCRYPT_LIMIT=72` so over-long values fail closed instead of truncating.
+- Default driver: **`HASH_DRIVER=argon2id`** (OWASP Password Storage Cheat Sheet; bcrypt is legacy-only).
+- Explicit costs in `config/hashing.php` / `.env.example`: **memory=65536 KiB, time=4, threads=1** — Laravel’s defaults, which already exceed OWASP’s minimum (m=19456 KiB / t=2 / p=1).
+- **`rehash_on_login` => true** so stored bcrypt (or weaker) hashes upgrade via `Hash::needsRehash` on login.
+- NIST: verifiers SHALL NOT truncate — argon2id hashes the full input (unlike bcrypt’s 72-byte behaviour).
 
 ## 2. Do not register a separate essentials provider
 
@@ -75,8 +83,8 @@ If `app/Concerns/ProfileValidationRules.php` exists and Larastan complains after
 ## 5. Password tests (offline)
 
 - Fake `UncompromisedVerifier` in `tests/TestCase.php` so `Password::uncompromised()` does not call HaveIBeenPwned in CI.
-- Align registration / reset / password-update fixtures to ≥12-character passphrases.
-- Cover: 12-char all-lowercase accepted; 8-char rejected; column-max accepted; column-max+1 rejected.
+- Align registration / reset / password-update fixtures to ≥15-character passphrases.
+- Cover: 14-char rejected; 15-char all-lowercase accepted; 15-char multibyte accepted; 255 accepted; 256 rejected; hash of `72×a + X` must not verify as `72×a + Y` (no truncation).
 
 ## 6. Rector (optional) — project `rector.php`
 
