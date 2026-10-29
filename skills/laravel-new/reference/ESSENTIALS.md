@@ -1,18 +1,12 @@
 # Sensible Laravel defaults (paste snippets)
 
-Kit-agnostic source changes. Prefer registering a dedicated provider so you do not depend on a particular `AppServiceProvider` shape. Or paste the boot body into an existing provider’s `boot()`.
+Kit-agnostic source changes. Apply into the install’s existing **`app/Providers/AppServiceProvider.php`** (`register()` / `boot()`), merging with any kit content already there. Do **not** create an `EssentialsServiceProvider`.
 
-## 1. Service provider — `app/Providers/EssentialsServiceProvider.php`
+## 1. `AppServiceProvider` — imports + `boot()` body
 
-Create this file, then register it (step 2).
+Ensure these `use` imports (skip any already present):
 
 ```php
-<?php
-
-declare(strict_types=1);
-
-namespace App\Providers;
-
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Date;
@@ -20,61 +14,47 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Facades\Vite;
-use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Sleep;
 use Illuminate\Validation\Rules\Password;
+```
 
-final class EssentialsServiceProvider extends ServiceProvider
-{
-    public function register(): void
-    {
-        //
-    }
+In `boot()` (append alongside kit helpers such as `configureDefaults()`; do not duplicate statements already present elsewhere in the class):
 
-    public function boot(): void
-    {
-        Model::shouldBeStrict();
-        Model::automaticallyEagerLoadRelationships();
+```php
+Model::shouldBeStrict();
+Model::automaticallyEagerLoadRelationships();
 
-        Date::use(CarbonImmutable::class);
+Date::use(CarbonImmutable::class);
 
-        DB::prohibitDestructiveCommands(app()->isProduction());
+DB::prohibitDestructiveCommands(app()->isProduction());
 
-        if (app()->isProduction()) {
-            URL::forceHttps();
-        }
+if (app()->isProduction()) {
+    URL::forceHttps();
+}
 
-        Vite::usePrefetchStrategy('aggressive');
+Vite::usePrefetchStrategy('aggressive');
 
-        if (! app()->runningUnitTests()) {
-            Password::defaults(fn (): ?Password => app()->isProduction()
-                ? Password::min(12)
-                    ->letters()
-                    ->mixedCase()
-                    ->numbers()
-                    ->symbols()
-                    ->max(255)
-                    ->uncompromised()
-                : null);
-        }
+Password::defaults(fn (): Password => Password::min(12)->max(255)->uncompromised());
 
-        if (app()->runningUnitTests()) {
-            Http::preventStrayRequests();
-            Sleep::fake();
-        }
-    }
+if (app()->runningUnitTests()) {
+    Http::preventStrayRequests();
+    Sleep::fake();
 }
 ```
 
-## 2. Register the provider — `bootstrap/providers.php`
+If the kit already defines `Password::defaults(...)` (often production-only with `mixedCase` / `numbers` / `symbols`, or an older min/max), **replace** it with the one-liner above.
 
-Add next to `AppServiceProvider`:
+Promote three-random-words passphrases (and a password manager) in UI copy.
 
-```php
-App\Providers\EssentialsServiceProvider::class,
-```
+### Hashing
 
-(Laravel 10 `config/app.php` providers array works the same if that is what the kit uses.)
+- Default driver: **`HASH_DRIVER=argon2id`**.
+- Explicit costs in `config/hashing.php` / `.env.example`: **memory=65536 KiB, time=4, threads=1**.
+- **`rehash_on_login` => true** so stored bcrypt (or weaker) hashes upgrade via `Hash::needsRehash` on login.
+
+## 2. Do not register a separate essentials provider
+
+Leave `bootstrap/providers.php` alone (aside from removing any legacy `EssentialsServiceProvider` entry).
 
 ## 3. `make:action` — copy stubs from this skill
 
@@ -91,10 +71,15 @@ Replace (or create) with `reference/stubs/pint.json`. Then run `vendor/bin/pint 
 
 If `app/Concerns/ProfileValidationRules.php` exists and Larastan complains after `User` becomes `final`, widen the `emailRules()` PHPDoc to `@return array<int, Unique|string>` and `use Illuminate\Validation\Rules\Unique`.
 
-## 5. Rector (optional) — project `rector.php`
+## 5. Password tests (offline)
+
+- Fake `UncompromisedVerifier` in `tests/TestCase.php` so kit registration / reset / update tests stay offline and deterministic with `Password::uncompromised()`.
+- Align registration / reset / password-update fixtures to ≥12-character passphrases.
+
+## 6. Rector (optional) — project `rector.php`
 
 If missing, copy `reference/stubs/rector.php`. Running Rector requires `rector/rector` separately.
 
-## 6. PHPStan
+## 7. PHPStan
 
 Keep the kit’s `phpstan.neon` / Larastan setup. Do not invent a package-oriented phpstan config. Run `vendor/bin/phpstan analyse` when present.
