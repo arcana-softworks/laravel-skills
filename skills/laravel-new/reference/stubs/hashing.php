@@ -7,9 +7,8 @@ return [
     | Default Hash Driver
     |--------------------------------------------------------------------------
     |
-    | laravel-new defaults to argon2id per OWASP Password Storage Cheat Sheet
-    | (first choice; bcrypt is legacy-only). NIST SP 800-63B-4 requires that
-    | verifiers SHALL NOT truncate passwords — argon2id hashes the full input.
+    | laravel-new defaults to argon2id. bcrypt remains available for legacy
+    | hashes; rehash_on_login upgrades them on successful login.
     |
     | Supported: "bcrypt", "argon", "argon2id"
     |
@@ -28,9 +27,7 @@ return [
     | Argon2id Options
     |--------------------------------------------------------------------------
     |
-    | OWASP minimum for Argon2id: m=19456 KiB (19 MiB), t=2, p=1.
-    | Laravel's defaults (65536 KiB / t=4 / p=1) already exceed that floor;
-    | we set them explicitly so upgrades stay intentional.
+    | Explicit costs (65536 KiB / t=4 / p=1) so upgrades stay intentional.
     |
     */
 

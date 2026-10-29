@@ -6,13 +6,10 @@ import re
 import sys
 from pathlib import Path
 
-# Min 12: deliberate user choice below NIST SP 800-63B-4's 15-char single-factor
-# SHALL (above ICO's 10; NCSC gives no number). Max 255 is a fixed request/DoS
-# bound (above NIST's ≥64 SHOULD); NOT the users.password column (stores hash).
 PASSWORD_MIN = 12
 PASSWORD_MAX = 255
 
-NCSC_PASSWORD = (
+PASSWORD_DEFAULTS = (
     "Password::defaults(fn (): Password => "
     f"Password::min({PASSWORD_MIN})->max({PASSWORD_MAX})->uncompromised());"
 )
@@ -91,7 +88,7 @@ def main() -> int:
                         end += 1
                     if end < len(src) and src[end] == ";":
                         end += 1
-                    return src[:start] + NCSC_PASSWORD + src[end:]
+                    return src[:start] + PASSWORD_DEFAULTS + src[end:]
             i += 1
         return src
 
@@ -171,7 +168,7 @@ def main() -> int:
         to_add.append(code)
 
     if not re.search(r"Password::defaults\s*\(", text):
-        to_add.append(NCSC_PASSWORD)
+        to_add.append(PASSWORD_DEFAULTS)
 
     if to_add:
         text = insert_into_boot(text, to_add)

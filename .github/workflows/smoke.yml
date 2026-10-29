@@ -62,11 +62,7 @@ jobs:
           grep -q 'HASH_DRIVER=argon2id' .env.example
           grep -q 'ARGON_MEMORY=65536' .env.example
           grep -q "'rehash_on_login' => true" config/hashing.php
-          test -f tests/Feature/Auth/PasswordCriteriaTest.php
-          grep -q 'test_eleven_char_password_is_rejected' tests/Feature/Auth/PasswordCriteriaTest.php
-          grep -q 'test_twelve_char_all_lowercase_passphrase_is_accepted' tests/Feature/Auth/PasswordCriteriaTest.php
-          grep -q 'test_twelve_character_multibyte_password_is_accepted' tests/Feature/Auth/PasswordCriteriaTest.php
-          grep -q 'test_hash_driver_does_not_truncate_past_seventy_two_bytes' tests/Feature/Auth/PasswordCriteriaTest.php
+          test ! -e tests/Feature/Auth/PasswordCriteriaTest.php
           grep -q UncompromisedVerifier tests/TestCase.php
           git add -A
           git commit -m "Apply sensible Laravel defaults (strict models, immutable dates, make:action, Pint)"

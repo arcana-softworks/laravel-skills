@@ -28,7 +28,7 @@ LARAVEL_NEW_STEPS=(
 laravel_new_step_description() {
   case "$1" in
     scaffold) echo "Scaffold Laravel app with the chosen starter kit" ;;
-    essentials) echo "Apply sensible PHP source defaults into AppServiceProvider (strict models, NIST/OWASP/NCSC passwords, dates, make:action, Pint)" ;;
+    essentials) echo "Apply sensible PHP source defaults into AppServiceProvider (strict models, Password::defaults, dates, make:action, Pint)" ;;
     boost) echo "Install Laravel Boost and configure agents" ;;
     wayfinder) echo "Install Wayfinder when Inertia + Vite (skip if already present / non-Inertia)" ;;
     js-fmt-lint) echo "Configure oxfmt/oxlint via vite-plus vp (or direct ox* fallback) + package scripts" ;;

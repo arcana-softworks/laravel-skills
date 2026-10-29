@@ -2,8 +2,6 @@
 
 Kit-agnostic source changes. Apply into the install’s existing **`app/Providers/AppServiceProvider.php`** (`register()` / `boot()`), merging with any kit content already there. Do **not** create an `EssentialsServiceProvider`.
 
-Password policy cites **OWASP Password Storage**, **NIST SP 800-63B-4**, and **NCSC** guidance.
-
 ## 1. `AppServiceProvider` — imports + `boot()` body
 
 Ensure these `use` imports (skip any already present):
@@ -36,13 +34,6 @@ if (app()->isProduction()) {
 
 Vite::usePrefetchStrategy('aggressive');
 
-// Passwords (OWASP / NIST SP 800-63B-4 / NCSC):
-// - min 12: deliberate user choice below NIST's 15-char single-factor SHALL
-//   (above ICO's 10; NCSC gives no number)
-// - max 255: fixed request/DoS bound (above NIST's ≥64 SHOULD); NOT the users.password
-//   column length (that column stores the hash, not the plaintext)
-// - no composition rules; uncompromised() = HIBP deny-list (k-anonymity)
-// Laravel Password::min/max count Unicode characters via mb_strlen.
 Password::defaults(fn (): Password => Password::min(12)->max(255)->uncompromised());
 
 if (app()->runningUnitTests()) {
@@ -53,14 +44,13 @@ if (app()->runningUnitTests()) {
 
 If the kit already defines `Password::defaults(...)` (often production-only with `mixedCase` / `numbers` / `symbols`, or an older min/max), **replace** it with the one-liner above.
 
-Promote three-random-words passphrases (and a password manager) in UI copy ([NCSC](https://www.ncsc.gov.uk/collection/top-tips-for-staying-secure-online/three-random-words)).
+Promote three-random-words passphrases (and a password manager) in UI copy.
 
-### Hashing (OWASP first choice: Argon2id)
+### Hashing
 
-- Default driver: **`HASH_DRIVER=argon2id`** (OWASP Password Storage Cheat Sheet; bcrypt is legacy-only).
-- Explicit costs in `config/hashing.php` / `.env.example`: **memory=65536 KiB, time=4, threads=1** — Laravel’s defaults, which already exceed OWASP’s minimum (m=19456 KiB / t=2 / p=1).
+- Default driver: **`HASH_DRIVER=argon2id`**.
+- Explicit costs in `config/hashing.php` / `.env.example`: **memory=65536 KiB, time=4, threads=1**.
 - **`rehash_on_login` => true** so stored bcrypt (or weaker) hashes upgrade via `Hash::needsRehash` on login.
-- NIST: verifiers SHALL NOT truncate — argon2id hashes the full input (unlike bcrypt’s 72-byte behaviour).
 
 ## 2. Do not register a separate essentials provider
 
@@ -83,9 +73,8 @@ If `app/Concerns/ProfileValidationRules.php` exists and Larastan complains after
 
 ## 5. Password tests (offline)
 
-- Fake `UncompromisedVerifier` in `tests/TestCase.php` so `Password::uncompromised()` does not call HaveIBeenPwned in CI.
+- Fake `UncompromisedVerifier` in `tests/TestCase.php` so kit registration / reset / update tests stay offline and deterministic with `Password::uncompromised()`.
 - Align registration / reset / password-update fixtures to ≥12-character passphrases.
-- Cover: 11-char rejected; 12-char all-lowercase accepted; 12-char multibyte accepted; 255 accepted; 256 rejected; hash of `72×a + X` must not verify as `72×a + Y` (no truncation).
 
 ## 6. Rector (optional) — project `rector.php`
 

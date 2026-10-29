@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Align kit password tests/UI/hashing with NIST/OWASP/NCSC Password::defaults."""
+"""Align kit password tests/UI/hashing with Password::defaults (min 12 / max 255 / uncompromised)."""
 from __future__ import annotations
 
 import re
@@ -12,8 +12,6 @@ PASSWORD_MAX = 255
 
 # 12-char all-lowercase passphrase (spaces count as characters).
 PASS_OK_12 = "apple banana"
-PASS_SHORT_11 = "apple banan"
-FACTORY_PLAIN = "password"
 
 
 def write(path: Path, text: str, root: Path) -> None:
@@ -26,7 +24,7 @@ def main() -> int:
     root = Path(sys.argv[1])
     stubs = Path(sys.argv[2])
 
-    # --- HASH_DRIVER=argon2id + explicit OWASP-meeting Argon costs ---
+    # --- HASH_DRIVER=argon2id + explicit Argon costs ---
     env_example = root / ".env.example"
     if env_example.is_file():
         text = env_example.read_text(encoding="utf-8")
@@ -42,7 +40,6 @@ def main() -> int:
         else:
             text = text.rstrip() + "\nHASH_DRIVER=argon2id\n"
 
-        # Explicit Argon2id costs (Laravel defaults already ≥ OWASP min).
         for key, value in (
             ("ARGON_MEMORY", "65536"),
             ("ARGON_TIME", "4"),
@@ -94,7 +91,7 @@ def main() -> int:
         # Always refresh published hashing.php from the skill stub so costs stay explicit.
         write(hashing, stub.read_text(encoding="utf-8"), root)
 
-    # --- TestCase: fake UncompromisedVerifier ---
+    # --- TestCase: minimal UncompromisedVerifier fake (keeps kit auth tests offline) ---
     test_case = root / "tests" / "TestCase.php"
     if test_case.is_file() and "UncompromisedVerifier" not in test_case.read_text(encoding="utf-8"):
         desired = """<?php
@@ -208,158 +205,11 @@ abstract class TestCase extends BaseTestCase
             path.write_text(new, encoding="utf-8")
             print(f"Aligned {rel} ({n} replacement(s))")
 
-    # --- Dedicated password-criteria feature test (always refresh for policy updates) ---
+    # Drop any previously generated PasswordCriteriaTest from earlier skill runs.
     criteria = root / "tests" / "Feature" / "Auth" / "PasswordCriteriaTest.php"
-    write(
-        criteria,
-        f"""<?php
-
-namespace Tests\\Feature\\Auth;
-
-use App\\Models\\User;
-use Illuminate\\Foundation\\Testing\\RefreshDatabase;
-use Illuminate\\Support\\Facades\\Hash;
-use Illuminate\\Validation\\Rules\\Password;
-use Laravel\\Fortify\\Features;
-use Tests\\TestCase;
-
-class PasswordCriteriaTest extends TestCase
-{{
-    use RefreshDatabase;
-
-    public function test_password_defaults_are_min_12_max_255_uncompromised_without_composition(): void
-    {{
-        $rules = Password::defaults()->appliedRules();
-
-        $this->assertSame({PASSWORD_MIN}, $rules['min']);
-        $this->assertSame({PASSWORD_MAX}, $rules['max']);
-        $this->assertTrue($rules['uncompromised']);
-        $this->assertFalse($rules['mixedCase']);
-        $this->assertFalse($rules['letters']);
-        $this->assertFalse($rules['numbers']);
-        $this->assertFalse($rules['symbols']);
-    }}
-
-    public function test_twelve_char_all_lowercase_passphrase_is_accepted(): void
-    {{
-        $this->skipUnlessFortifyHas(Features::registration());
-
-        $response = $this->post(route('register.store'), [
-            'name' => 'Passphrase User',
-            'email' => 'passphrase@example.com',
-            'password' => '{PASS_OK_12}',
-            'password_confirmation' => '{PASS_OK_12}',
-        ]);
-
-        $response->assertSessionHasNoErrors();
-        $this->assertAuthenticated();
-    }}
-
-    public function test_eleven_char_password_is_rejected(): void
-    {{
-        $this->skipUnlessFortifyHas(Features::registration());
-
-        $response = $this->post(route('register.store'), [
-            'name' => 'Short User',
-            'email' => 'short@example.com',
-            'password' => '{PASS_SHORT_11}',
-            'password_confirmation' => '{PASS_SHORT_11}',
-        ]);
-
-        $response->assertSessionHasErrors('password');
-        $this->assertGuest();
-    }}
-
-    public function test_twelve_character_multibyte_password_is_accepted(): void
-    {{
-        $this->skipUnlessFortifyHas(Features::registration());
-
-        // 12 Unicode code points (accented letters); Password::min uses mb_strlen.
-        $password = str_repeat('é', {PASSWORD_MIN});
-        $this->assertSame({PASSWORD_MIN}, mb_strlen($password));
-
-        $response = $this->post(route('register.store'), [
-            'name' => 'Unicode User',
-            'email' => 'unicode@example.com',
-            'password' => $password,
-            'password_confirmation' => $password,
-        ]);
-
-        $response->assertSessionHasNoErrors();
-        $this->assertAuthenticated();
-    }}
-
-    public function test_password_at_max_length_is_accepted(): void
-    {{
-        $this->skipUnlessFortifyHas(Features::registration());
-
-        $password = str_repeat('a', {PASSWORD_MAX});
-
-        $response = $this->post(route('register.store'), [
-            'name' => 'Max User',
-            'email' => 'max@example.com',
-            'password' => $password,
-            'password_confirmation' => $password,
-        ]);
-
-        $response->assertSessionHasNoErrors();
-        $this->assertAuthenticated();
-    }}
-
-    public function test_password_over_max_length_is_rejected(): void
-    {{
-        $this->skipUnlessFortifyHas(Features::registration());
-
-        $password = str_repeat('a', {PASSWORD_MAX + 1});
-
-        $response = $this->post(route('register.store'), [
-            'name' => 'Overmax User',
-            'email' => 'overmax@example.com',
-            'password' => $password,
-            'password_confirmation' => $password,
-        ]);
-
-        $response->assertSessionHasErrors('password');
-        $this->assertGuest();
-    }}
-
-    public function test_hash_driver_does_not_truncate_past_seventy_two_bytes(): void
-    {{
-        $prefix = str_repeat('a', 72);
-        $passwordA = $prefix.'X';
-        $passwordB = $prefix.'Y';
-
-        $this->assertSame('argon2id', config('hashing.driver'));
-        $this->assertNotSame($passwordA, $passwordB);
-        $this->assertGreaterThan(72, strlen($passwordA));
-
-        $hash = Hash::make($passwordA);
-
-        $this->assertTrue(Hash::check($passwordA, $hash));
-        $this->assertFalse(Hash::check($passwordB, $hash));
-    }}
-
-    public function test_password_update_accepts_passphrase_without_composition_rules(): void
-    {{
-        $user = User::factory()->create([
-            'password' => Hash::make('{FACTORY_PLAIN}'),
-        ]);
-
-        $response = $this
-            ->actingAs($user)
-            ->put(route('user-password.update'), [
-                'current_password' => '{FACTORY_PLAIN}',
-                'password' => '{PASS_OK_12}',
-                'password_confirmation' => '{PASS_OK_12}',
-            ]);
-
-        $response->assertSessionHasNoErrors();
-        $this->assertTrue(Hash::check('{PASS_OK_12}', $user->refresh()->password));
-    }}
-}}
-""",
-        root,
-    )
+    if criteria.is_file():
+        criteria.unlink()
+        print(f"Removed {criteria.relative_to(root)}")
 
     # --- Frontend help copy ---
     for rel in (

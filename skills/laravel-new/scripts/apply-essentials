@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # apply-essentials — idempotently apply sensible Laravel defaults into the app's
-# existing AppServiceProvider (plus make:action, Pint/Rector stubs, NIST/OWASP/NCSC passwords).
+# existing AppServiceProvider (plus make:action, Pint/Rector stubs, Password::defaults).
 #
 # Does NOT create EssentialsServiceProvider or register anything in
 # bootstrap/providers.php.
@@ -50,8 +50,7 @@ copy_stub() {
   cp "$src" "$dest"
 }
 
-# Fixed password policy constants (shared with Python helpers / docs).
-# Min 12: deliberate user choice below NIST SP 800-63B-4's 15-char single-factor SHALL.
+# Fixed password policy constants (shared with Python helpers).
 PASSWORD_MIN=12
 PASSWORD_MAX=255
 
@@ -116,7 +115,7 @@ align_password_surfaces() {
     log "[dry-run] would align password tests, hashing, and UI copy"
     return 0
   fi
-  log "Aligning password surfaces (NIST min ${PASSWORD_MIN} / max ${PASSWORD_MAX}, argon2id)"
+  log "Aligning password surfaces (Password::defaults, argon2id)"
   python3 "${LIB_DIR}/align_password_surfaces.py" "$APP_DIR" "$STUBS_DIR"
 }
 
@@ -231,12 +230,9 @@ cat <<EOF
 
 Applied:
   - app/Providers/AppServiceProvider.php (essentials in boot()/existing helpers; no EssentialsServiceProvider)
-  - Passwords: Password::min(${PASSWORD_MIN})->max(${PASSWORD_MAX})->uncompromised()
-      (min 12 = deliberate user choice below NIST SP 800-63B-4's 15-char single-factor SHALL,
-       above ICO's 10; fixed max 255 for request/DoS bounds — not the hash column;
-       NCSC: no composition rules; HIBP uncompromised deny-list)
-  - HASH_DRIVER=argon2id with explicit Argon costs ≥ OWASP minimum; rehash_on_login enabled
-  - Password criteria tests + UncompromisedVerifier fake in TestCase
+  - Passwords follow Password::defaults (min ${PASSWORD_MIN} / max ${PASSWORD_MAX} / uncompromised)
+  - HASH_DRIVER=argon2id with explicit Argon costs; rehash_on_login enabled
+  - UncompromisedVerifier fake in TestCase (keeps kit auth tests offline)
   - php artisan make:action (+ stubs/action.stub)
   - pint.json (+ Pint when vendor present)
   - rector.php (if missing)
