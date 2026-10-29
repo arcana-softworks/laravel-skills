@@ -14,7 +14,7 @@ description: >-
 
 Create a fresh Laravel app → apply sensible source defaults → Boost / Wayfinder / vite-plus (`vp`) JS tooling + anti-slop + CI.
 
-Install: `npx skills add arcana-softworks/laravel-skills` (optionally `--skill laravel-new -g -a cursor -a claude-code -a codex -y`).
+Install: `npx skills add arcana-softworks/skills` (optionally `--skill laravel-new -g -a cursor -a claude-code -a codex -y`).
 
 ```bash
 SKILL_ROOT="…/skills/laravel-new"   # path after install
